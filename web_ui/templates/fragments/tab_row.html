@@ -1,0 +1,86 @@
+<tr class="tab-row {% if tab.is_processed %}processed{% endif %}" id="tab-row-{{ tab.id }}">
+    <!-- Checkbox -->
+    <td class="col-checkbox">
+        <input type="checkbox" class="tab-checkbox" value="{{ tab.id }}" onchange="updateSelectedCount()">
+    </td>
+
+    <!-- Title -->
+    <td class="col-title">
+        <div class="title-cell">
+            <a href="{{ tab.url }}" target="_blank" rel="noopener" class="tab-link" title="{{ tab.url }}">
+                {{ tab.display_title }}
+            </a>
+            {% if tab.window_label %}
+            <span class="window-label">{{ tab.window_label }}</span>
+            {% endif %}
+            {% if tab.summary %}
+            <p class="tab-summary">{{ tab.summary[:150] }}{% if tab.summary|length > 150 %}...{% endif %}</p>
+            {% endif %}
+        </div>
+    </td>
+
+    <!-- Content Type -->
+    <td class="col-type">
+        {% if tab.content_type %}
+        <span class="badge {{ tab.content_type_badge_class }}">
+            {{ tab.content_type }}
+        </span>
+        {% elif tab.site_kind %}
+        <span class="badge badge-default">
+            {{ tab.site_kind }}
+        </span>
+        {% else %}
+        <span class="badge badge-default">-</span>
+        {% endif %}
+    </td>
+
+    <!-- Status -->
+    <td class="col-status">
+        <span class="badge {{ tab.status_badge_class }}">
+            {{ tab.status }}
+        </span>
+    </td>
+
+    <!-- Read Time -->
+    <td class="col-time">
+        <span class="read-time">{{ tab.read_time_display }}</span>
+    </td>
+
+    <!-- Tags -->
+    <td class="col-tags">
+        <div class="tags-list">
+            {% for tag in tab.tags[:3] %}
+            <span class="tag">{{ tag }}</span>
+            {% endfor %}
+            {% if tab.tags|length > 3 %}
+            <span class="tag tag-more">+{{ tab.tags|length - 3 }}</span>
+            {% endif %}
+        </div>
+    </td>
+
+    <!-- Actions -->
+    <td class="col-actions">
+        <div class="action-buttons">
+            <button
+                class="btn btn-icon {% if tab.is_processed %}btn-processed{% endif %}"
+                hx-post="/tabs/{{ tab.id }}/toggle_processed"
+                hx-target="#tab-row-{{ tab.id }}"
+                hx-swap="outerHTML"
+                title="{% if tab.is_processed %}Mark as unprocessed{% else %}Mark as processed{% endif %}"
+            >
+                {% if tab.is_processed %}
+                <span class="icon">&#10003;</span>
+                {% else %}
+                <span class="icon">&#9675;</span>
+                {% endif %}
+            </button>
+            <button
+                class="btn btn-icon"
+                onclick="showTabDetail({{ tab.id }})"
+                title="View details"
+            >
+                <span class="icon">&#8943;</span>
+            </button>
+        </div>
+    </td>
+</tr>

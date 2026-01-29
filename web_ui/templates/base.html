@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}TabBacklog{% endblock %}</title>
+
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/style.css">
+
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <h1 class="logo">TabBacklog</h1>
+            <nav class="nav">
+                <a href="/" class="nav-link">Tabs</a>
+                <a href="/stats" class="nav-link">Stats</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+        <p>TabBacklog v1.0 - Manage your browser tabs</p>
+    </footer>
+
+    <!-- Toast notifications -->
+    <div id="toast-container"></div>
+
+    <script>
+        // HTMX event handlers
+        document.body.addEventListener('htmx:afterSwap', function(event) {
+            // Update selected count after table refresh
+            updateSelectedCount();
+        });
+
+        document.body.addEventListener('htmx:responseError', function(event) {
+            showToast('Error: ' + event.detail.xhr.statusText, 'error');
+        });
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast toast-' + type;
+            toast.textContent = message;
+            container.appendChild(toast);
+
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        function updateSelectedCount() {
+            const checkboxes = document.querySelectorAll('.tab-checkbox:checked');
+            const countEl = document.getElementById('selected-count');
+            if (countEl) {
+                countEl.textContent = checkboxes.length;
+            }
+
+            // Enable/disable export buttons
+            const exportBtns = document.querySelectorAll('.export-btn');
+            exportBtns.forEach(btn => {
+                btn.disabled = checkboxes.length === 0;
+            });
+        }
+    </script>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

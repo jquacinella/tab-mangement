@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+
+{% block title %}TabBacklog - Your Tabs{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Filters Section -->
+    <section class="filters-section">
+        <form id="filter-form" hx-get="/tabs" hx-target="#tabs-body" hx-trigger="change, keyup delay:300ms from:#search-input">
+            <div class="filters-row">
+                <!-- Search -->
+                <div class="filter-group search-group">
+                    <label for="search-input">Search</label>
+                    <input
+                        type="text"
+                        id="search-input"
+                        name="search"
+                        placeholder="Search tabs..."
+                        class="search-input"
+                    >
+                </div>
+
+                <!-- Status Filter -->
+                <div class="filter-group">
+                    <label for="status-filter">Status</label>
+                    <select id="status-filter" name="status" class="filter-select">
+                        <option value="">All Status</option>
+                        {% for status in filter_options.statuses %}
+                        <option value="{{ status }}">{{ status }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- Content Type Filter -->
+                <div class="filter-group">
+                    <label for="content-type-filter">Type</label>
+                    <select id="content-type-filter" name="content_type" class="filter-select">
+                        <option value="">All Types</option>
+                        {% for ctype in filter_options.content_types %}
+                        <option value="{{ ctype }}">{{ ctype }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- Processed Filter -->
+                <div class="filter-group">
+                    <label for="processed-filter">Processed</label>
+                    <select id="processed-filter" name="is_processed" class="filter-select">
+                        <option value="">All</option>
+                        <option value="false">Unprocessed</option>
+                        <option value="true">Processed</option>
+                    </select>
+                </div>
+
+                <!-- Read Time Filter -->
+                <div class="filter-group">
+                    <label for="read-time-filter">Max Read Time</label>
+                    <select id="read-time-filter" name="read_time_max" class="filter-select">
+                        <option value="">Any</option>
+                        <option value="5">5 min</option>
+                        <option value="10">10 min</option>
+                        <option value="15">15 min</option>
+                        <option value="30">30 min</option>
+                        <option value="60">1 hour</option>
+                    </select>
+                </div>
+            </div>
+        </form>
+    </section>
+
+    <!-- Actions Bar -->
+    <section class="actions-bar">
+        <div class="selection-info">
+            <label class="checkbox-label">
+                <input type="checkbox" id="select-all" onchange="toggleSelectAll(this)">
+                Select All
+            </label>
+            <span class="selected-count">
+                <span id="selected-count">0</span> selected
+            </span>
+        </div>
+
+        <div class="export-buttons">
+            <button
+                class="btn btn-secondary export-btn"
+                onclick="exportSelected('json')"
+                disabled
+            >
+                Export JSON
+            </button>
+            <button
+                class="btn btn-secondary export-btn"
+                onclick="exportSelected('markdown')"
+                disabled
+            >
+                Export Markdown
+            </button>
+            <button
+                class="btn btn-primary export-btn"
+                onclick="exportSelected('obsidian')"
+                disabled
+            >
+                Export to Obsidian
+            </button>
+        </div>
+
+        <div class="stats-summary">
+            <span class="stat">Total: {{ filter_options.total }}</span>
+            <span class="stat">Processed: {{ filter_options.processed }}</span>
+            <span class="stat">Remaining: {{ filter_options.unprocessed }}</span>
+        </div>
+    </section>
+
+    <!-- Tabs Table -->
+    <section class="tabs-section">
+        <table class="tabs-table">
+            <thead>
+                <tr>
+                    <th class="col-checkbox"></th>
+                    <th class="col-title">Title</th>
+                    <th class="col-type">Type</th>
+                    <th class="col-status">Status</th>
+                    <th class="col-time">Time</th>
+                    <th class="col-tags">Tags</th>
+                    <th class="col-actions">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="tabs-body" hx-get="/tabs" hx-trigger="load" hx-swap="innerHTML">
+                <tr>
+                    <td colspan="7" class="loading-cell">
+                        <div class="loading-spinner"></div>
+                        Loading tabs...
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- Pagination -->
+    <section id="pagination-section" class="pagination-section">
+        <!-- Populated by HTMX -->
+    </section>
+</div>
+
+<!-- Tab Detail Modal -->
+<div id="tab-modal" class="modal" style="display: none;">
+    <div class="modal-backdrop" onclick="closeModal()"></div>
+    <div class="modal-content" id="modal-content">
+        <!-- Content loaded via HTMX -->
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function toggleSelectAll(checkbox) {
+        const checkboxes = document.querySelectorAll('.tab-checkbox');
+        checkboxes.forEach(cb => cb.checked = checkbox.checked);
+        updateSelectedCount();
+    }
+
+    function getSelectedIds() {
+        const checkboxes = document.querySelectorAll('.tab-checkbox:checked');
+        return Array.from(checkboxes).map(cb => parseInt(cb.value));
+    }
+
+    async function exportSelected(format) {
+        const ids = getSelectedIds();
+        if (ids.length === 0) {
+            showToast('Please select tabs to export', 'warning');
+            return;
+        }
+
+        try {
+            const response = await fetch(`/export/${format}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({tab_ids: ids})
+            });
+
+            if (!response.ok) {
+                throw new Error('Export failed');
+            }
+
+            // Get filename from Content-Disposition header
+            const disposition = response.headers.get('Content-Disposition');
+            const filename = disposition
+                ? disposition.split('filename=')[1].replace(/"/g, '')
+                : `export.${format === 'json' ? 'json' : 'md'}`;
+
+            // Download the file
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+
+            showToast(`Exported ${ids.length} tabs`, 'success');
+        } catch (error) {
+            showToast('Export failed: ' + error.message, 'error');
+        }
+    }
+
+    function showTabDetail(tabId) {
+        const modal = document.getElementById('tab-modal');
+        const content = document.getElementById('modal-content');
+
+        // Load content via HTMX
+        htmx.ajax('GET', `/tabs/${tabId}`, {target: '#modal-content', swap: 'innerHTML'});
+        modal.style.display = 'flex';
+    }
+
+    function closeModal() {
+        document.getElementById('tab-modal').style.display = 'none';
+    }
+
+    // Close modal on escape
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeModal();
+    });
+
+    // Update count on checkbox change
+    document.addEventListener('change', function(e) {
+        if (e.target.classList.contains('tab-checkbox')) {
+            updateSelectedCount();
+        }
+    });
+</script>
+{% endblock %}
