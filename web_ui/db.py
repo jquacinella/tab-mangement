@@ -80,13 +80,18 @@ class Database:
             param_idx += 1
 
         if filters.search:
+            # Use pg_trgm similarity search for fuzzy matching
+            # Falls back to ILIKE if similarity threshold not met
             conditions.append(f"""
-                (t.page_title ILIKE ${param_idx}
-                 OR t.url ILIKE ${param_idx}
-                 OR e.summary ILIKE ${param_idx})
+                (t.page_title % ${param_idx}
+                 OR e.summary % ${param_idx}
+                 OR t.page_title ILIKE ${param_idx + 1}
+                 OR t.url ILIKE ${param_idx + 1}
+                 OR e.summary ILIKE ${param_idx + 1})
             """)
-            params.append(f"%{filters.search}%")
-            param_idx += 1
+            params.append(filters.search)  # For trigram similarity
+            params.append(f"%{filters.search}%")  # For ILIKE fallback
+            param_idx += 2
 
         if filters.project:
             conditions.append(f"e.raw_meta->>'projects' ILIKE ${param_idx}")
@@ -303,6 +308,125 @@ class Database:
             ))
 
         return exports
+
+    async def semantic_search(
+        self,
+        user_id: str,
+        query_embedding: list[float],
+        limit: int = 50,
+    ) -> list[TabDisplay]:
+        """
+        Search tabs using vector similarity (semantic search).
+
+        Args:
+            user_id: User ID to filter by
+            query_embedding: Query embedding vector
+            limit: Maximum results to return
+
+        Returns:
+            List of TabDisplay sorted by similarity
+        """
+        query = """
+            SELECT
+                t.id,
+                t.url,
+                t.page_title,
+                t.window_label,
+                t.status,
+                t.is_processed,
+                t.processed_at,
+                t.created_at,
+                p.site_kind,
+                p.word_count,
+                p.video_seconds,
+                e.summary,
+                e.content_type,
+                e.est_read_min,
+                e.priority,
+                e.raw_meta,
+                1 - (emb.embedding <=> $2::vector) as similarity
+            FROM tab_item t
+            LEFT JOIN tab_parsed p ON t.id = p.tab_id
+            LEFT JOIN tab_enrichment e ON t.id = e.tab_id
+            JOIN tab_embedding emb ON t.id = emb.tab_id
+            WHERE t.user_id = $1 AND t.deleted_at IS NULL
+            ORDER BY emb.embedding <=> $2::vector
+            LIMIT $3
+        """
+
+        async with self.connection() as conn:
+            # Convert embedding list to string format for pgvector
+            embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
+            rows = await conn.fetch(query, user_id, embedding_str, limit)
+
+        tabs = []
+        for row in rows:
+            raw_meta = row["raw_meta"] or {}
+            if isinstance(raw_meta, str):
+                raw_meta = json.loads(raw_meta)
+
+            tabs.append(TabDisplay(
+                id=row["id"],
+                url=row["url"],
+                page_title=row["page_title"],
+                window_label=row["window_label"],
+                status=row["status"],
+                is_processed=row["is_processed"],
+                processed_at=row["processed_at"],
+                created_at=row["created_at"],
+                site_kind=row["site_kind"],
+                word_count=row["word_count"],
+                video_seconds=row["video_seconds"],
+                summary=row["summary"],
+                content_type=row["content_type"],
+                est_read_min=row["est_read_min"],
+                priority=row["priority"],
+                tags=raw_meta.get("tags", []),
+                projects=raw_meta.get("projects", []),
+            ))
+
+        return tabs
+
+    async def get_tabs_without_embeddings(self, user_id: str, limit: int = 100) -> list[dict]:
+        """Get tabs that don't have embeddings yet"""
+        query = """
+            SELECT t.id, t.url, t.page_title, e.summary, p.text_full
+            FROM tab_item t
+            LEFT JOIN tab_enrichment e ON t.id = e.tab_id
+            LEFT JOIN tab_parsed p ON t.id = p.tab_id
+            LEFT JOIN tab_embedding emb ON t.id = emb.tab_id
+            WHERE t.user_id = $1
+              AND t.deleted_at IS NULL
+              AND emb.tab_id IS NULL
+              AND t.status = 'enriched'
+            ORDER BY t.created_at DESC
+            LIMIT $2
+        """
+
+        async with self.connection() as conn:
+            rows = await conn.fetch(query, user_id, limit)
+
+        return [dict(row) for row in rows]
+
+    async def save_embedding(
+        self,
+        tab_id: int,
+        embedding: list[float],
+        model_name: str,
+    ) -> None:
+        """Save an embedding for a tab"""
+        query = """
+            INSERT INTO tab_embedding (tab_id, embedding, model_name)
+            VALUES ($1, $2::vector, $3)
+            ON CONFLICT (tab_id) DO UPDATE SET
+                embedding = EXCLUDED.embedding,
+                model_name = EXCLUDED.model_name,
+                updated_at = now()
+        """
+
+        async with self.connection() as conn:
+            embedding_str = "[" + ",".join(map(str, embedding)) + "]"
+            await conn.execute(query, tab_id, embedding_str, model_name)
 
     async def get_filter_options(self, user_id: str) -> dict:
         """Get available filter options"""

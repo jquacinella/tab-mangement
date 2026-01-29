@@ -17,7 +17,7 @@ from fastapi.templating import Jinja2Templates
 from . import __version__
 from .db import init_database, close_database, get_database
 from .models import HealthResponse
-from .routes import tabs_router, export_router
+from .routes import tabs_router, export_router, search_router
 
 # Configure logging
 logging.basicConfig(
@@ -65,6 +65,7 @@ app.state.templates = templates
 # Include routers
 app.include_router(tabs_router)
 app.include_router(export_router)
+app.include_router(search_router)
 
 
 def get_user_id() -> str:

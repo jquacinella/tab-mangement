@@ -11,13 +11,19 @@
                 <!-- Search -->
                 <div class="filter-group search-group">
                     <label for="search-input">Search</label>
-                    <input
-                        type="text"
-                        id="search-input"
-                        name="search"
-                        placeholder="Search tabs..."
-                        class="search-input"
-                    >
+                    <div class="search-wrapper">
+                        <input
+                            type="text"
+                            id="search-input"
+                            name="search"
+                            placeholder="Search tabs..."
+                            class="search-input"
+                        >
+                        <label class="search-mode-toggle" title="Use semantic search (AI-powered)">
+                            <input type="checkbox" id="semantic-search-toggle" onchange="toggleSearchMode()">
+                            <span class="toggle-label">AI</span>
+                        </label>
+                    </div>
                 </div>
 
                 <!-- Status Filter -->
@@ -229,5 +235,46 @@
             updateSelectedCount();
         }
     });
+
+    // Search mode toggle
+    let semanticSearchEnabled = false;
+
+    function toggleSearchMode() {
+        semanticSearchEnabled = document.getElementById('semantic-search-toggle').checked;
+        const form = document.getElementById('filter-form');
+
+        if (semanticSearchEnabled) {
+            // Update form to use semantic search endpoint
+            form.setAttribute('hx-get', '/search/semantic');
+            form.setAttribute('data-search-mode', 'semantic');
+            showToast('Semantic search enabled (AI-powered)', 'info');
+        } else {
+            // Reset to regular search
+            form.setAttribute('hx-get', '/tabs');
+            form.setAttribute('data-search-mode', 'fuzzy');
+        }
+
+        // Re-process HTMX attributes
+        htmx.process(form);
+    }
+
+    // Semantic search requires a minimum query length
+    document.getElementById('search-input').addEventListener('input', function(e) {
+        if (semanticSearchEnabled && e.target.value.length > 0 && e.target.value.length < 3) {
+            // Don't trigger semantic search for very short queries
+            e.stopPropagation();
+        }
+    });
+
+    // Generate embeddings button handler
+    async function generateEmbeddings() {
+        try {
+            const response = await fetch('/search/generate-embeddings', {method: 'POST'});
+            const data = await response.json();
+            showToast(data.message, 'success');
+        } catch (error) {
+            showToast('Failed to start embedding generation', 'error');
+        }
+    }
 </script>
 {% endblock %}
