@@ -1,0 +1,105 @@
+<div class="tab-detail">
+    <button class="modal-close" onclick="closeModal()">&times;</button>
+
+    <header class="detail-header">
+        <h2 class="detail-title">
+            <a href="{{ tab.url }}" target="_blank" rel="noopener">
+                {{ tab.display_title }}
+            </a>
+        </h2>
+        <p class="detail-url">{{ tab.url }}</p>
+    </header>
+
+    <div class="detail-badges">
+        {% if tab.content_type %}
+        <span class="badge {{ tab.content_type_badge_class }}">{{ tab.content_type }}</span>
+        {% endif %}
+        <span class="badge {{ tab.status_badge_class }}">{{ tab.status }}</span>
+        {% if tab.priority %}
+        <span class="badge badge-priority-{{ tab.priority }}">{{ tab.priority }} priority</span>
+        {% endif %}
+        {% if tab.is_processed %}
+        <span class="badge badge-processed">Processed</span>
+        {% endif %}
+    </div>
+
+    {% if tab.summary %}
+    <section class="detail-section">
+        <h3>Summary</h3>
+        <p class="detail-summary">{{ tab.summary }}</p>
+    </section>
+    {% endif %}
+
+    <section class="detail-section">
+        <h3>Details</h3>
+        <dl class="detail-list">
+            <dt>Site Type</dt>
+            <dd>{{ tab.site_kind or '-' }}</dd>
+
+            <dt>Window</dt>
+            <dd>{{ tab.window_label or '-' }}</dd>
+
+            <dt>Read Time</dt>
+            <dd>{{ tab.read_time_display }}</dd>
+
+            {% if tab.word_count %}
+            <dt>Word Count</dt>
+            <dd>{{ "{:,}".format(tab.word_count) }} words</dd>
+            {% endif %}
+
+            {% if tab.video_seconds %}
+            <dt>Duration</dt>
+            <dd>{{ (tab.video_seconds // 60) }}:{{ "{:02d}".format(tab.video_seconds % 60) }}</dd>
+            {% endif %}
+
+            <dt>Added</dt>
+            <dd>{{ tab.created_at.strftime('%Y-%m-%d %H:%M') }}</dd>
+
+            {% if tab.processed_at %}
+            <dt>Processed</dt>
+            <dd>{{ tab.processed_at.strftime('%Y-%m-%d %H:%M') }}</dd>
+            {% endif %}
+        </dl>
+    </section>
+
+    {% if tab.tags %}
+    <section class="detail-section">
+        <h3>Tags</h3>
+        <div class="tags-list detail-tags">
+            {% for tag in tab.tags %}
+            <span class="tag">{{ tag }}</span>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {% if tab.projects %}
+    <section class="detail-section">
+        <h3>Projects</h3>
+        <div class="projects-list">
+            {% for project in tab.projects %}
+            <span class="project-badge">{{ project }}</span>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <footer class="detail-footer">
+        <button
+            class="btn {% if tab.is_processed %}btn-secondary{% else %}btn-primary{% endif %}"
+            hx-post="/tabs/{{ tab.id }}/toggle_processed"
+            hx-target="#tab-row-{{ tab.id }}"
+            hx-swap="outerHTML"
+            onclick="closeModal()"
+        >
+            {% if tab.is_processed %}
+            Mark as Unprocessed
+            {% else %}
+            Mark as Processed
+            {% endif %}
+        </button>
+        <a href="{{ tab.url }}" target="_blank" rel="noopener" class="btn btn-secondary">
+            Open Link
+        </a>
+    </footer>
+</div>

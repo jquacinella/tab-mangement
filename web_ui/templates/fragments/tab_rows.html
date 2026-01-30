@@ -1,0 +1,49 @@
+{% for tab in tabs %}
+{% include "fragments/tab_row.html" %}
+{% else %}
+<tr>
+    <td colspan="7" class="empty-cell">
+        <div class="empty-state">
+            <p>No tabs found</p>
+            <p class="empty-hint">Try adjusting your filters or import some bookmarks</p>
+        </div>
+    </td>
+</tr>
+{% endfor %}
+
+{% if tabs %}
+<!-- Pagination info in a separate row -->
+<tr class="pagination-row">
+    <td colspan="7">
+        <div class="pagination-controls">
+            <span class="pagination-info">
+                Showing {{ tabs|length }} of {{ total }} tabs (Page {{ page }} of {{ total_pages }})
+            </span>
+
+            <div class="pagination-buttons">
+                {% if has_prev %}
+                <button
+                    class="btn btn-sm"
+                    hx-get="/tabs?page={{ page - 1 }}{% if filters.status %}&status={{ filters.status }}{% endif %}{% if filters.content_type %}&content_type={{ filters.content_type }}{% endif %}{% if filters.search %}&search={{ filters.search }}{% endif %}{% if filters.is_processed is not none %}&is_processed={{ filters.is_processed }}{% endif %}"
+                    hx-target="#tabs-body"
+                    hx-swap="innerHTML"
+                >
+                    Previous
+                </button>
+                {% endif %}
+
+                {% if has_next %}
+                <button
+                    class="btn btn-sm"
+                    hx-get="/tabs?page={{ page + 1 }}{% if filters.status %}&status={{ filters.status }}{% endif %}{% if filters.content_type %}&content_type={{ filters.content_type }}{% endif %}{% if filters.search %}&search={{ filters.search }}{% endif %}{% if filters.is_processed is not none %}&is_processed={{ filters.is_processed }}{% endif %}"
+                    hx-target="#tabs-body"
+                    hx-swap="innerHTML"
+                >
+                    Next
+                </button>
+                {% endif %}
+            </div>
+        </div>
+    </td>
+</tr>
+{% endif %}

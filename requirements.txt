@@ -27,6 +27,7 @@ yt-dlp==2024.1.0
 dspy-ai==2.4.0
 openai==1.10.0
 pydantic==2.5.3
+pydantic-settings==2.1.0
 
 # Vector Search
 pgvector==0.2.4

@@ -1,0 +1,638 @@
+{
+  "name": "TabBacklog - Enrich Tabs",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Every 10 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, user_id, url, page_title, window_label, status\nFROM tab_item\nWHERE status = 'new'\n  AND deleted_at IS NULL\nORDER BY created_at ASC\nLIMIT {{ $json.batch_size || 10 }}",
+        "options": {}
+      },
+      "id": "get-new-tabs",
+      "name": "Get New Tabs",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [220, 0],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "TabBacklog Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-has-tabs",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-tabs-exist",
+      "name": "Has Tabs?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "batchSize": 2,
+        "options": {}
+      },
+      "id": "split-batches",
+      "name": "Split In Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [660, -100]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE tab_item\nSET status = 'fetch_pending', updated_at = now()\nWHERE id = {{ $json.id }}\nRETURNING id, url, page_title",
+        "options": {}
+      },
+      "id": "update-fetch-pending",
+      "name": "Set Fetch Pending",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [880, -100],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "TabBacklog Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PARSER_SERVICE_URL }}/fetch_parse",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"url\": \"{{ $json.url }}\",\n  \"timeout\": 30\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "call-parser",
+      "name": "Call Parser Service",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1100, -100],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-parse-success",
+              "leftValue": "={{ $json.site_kind }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-parse-success",
+      "name": "Parse Success?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1320, -100]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO tab_parsed (tab_id, site_kind, title_extracted, text_full, word_count, video_seconds, metadata)\nVALUES (\n  {{ $('Set Fetch Pending').item.json.id }},\n  '{{ $json.site_kind }}',\n  {{ $json.title ? \"'\" + $json.title.replace(/'/g, \"''\") + \"'\" : \"NULL\" }},\n  {{ $json.text_full ? \"'\" + $json.text_full.replace(/'/g, \"''\").substring(0, 50000) + \"'\" : \"NULL\" }},\n  {{ $json.word_count || \"NULL\" }},\n  {{ $json.video_seconds || \"NULL\" }},\n  '{{ JSON.stringify($json.metadata || {}) }}'\n)\nON CONFLICT (tab_id) DO UPDATE SET\n  site_kind = EXCLUDED.site_kind,\n  title_extracted = EXCLUDED.title_extracted,\n  text_full = EXCLUDED.text_full,\n  word_count = EXCLUDED.word_count,\n  video_seconds = EXCLUDED.video_seconds,\n  metadata = EXCLUDED.metadata,\n  updated_at = now()",
+        "options": {}
+      },
+      "id": "insert-parsed",
+      "name": "Insert Parsed Content",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [1540, -200],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "TabBacklog Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE tab_item\nSET status = 'parsed', updated_at = now()\nWHERE id = {{ $('Set Fetch Pending').item.json.id }};\n\nINSERT INTO event_log (user_id, event_type, entity_type, entity_id, details)\nSELECT user_id, 'fetch_success', 'tab_item', id, '{\"source\": \"n8n_workflow\"}'::jsonb\nFROM tab_item WHERE id = {{ $('Set Fetch Pending').item.json.id }};",
+        "options": {}
+      },
+      "id": "update-parsed-status",
+      "name": "Set Status Parsed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [1760, -200],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "TabBacklog Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE tab_item\nSET status = 'fetch_error',\n    last_error = '{{ $json.error || \"Unknown fetch error\" }}',\n    error_at = now(),\n    updated_at = now()\nWHERE id = {{ $('Set Fetch Pending').item.json.id }};\n\nINSERT INTO event_log (user_id, event_type, entity_type, entity_id, details)\nSELECT user_id, 'fetch_error', 'tab_item', id, \n  jsonb_build_object('error', '{{ $json.error || \"Unknown error\" }}', 'source', 'n8n_workflow')\nFROM tab_item WHERE id = {{ $('Set Fetch Pending').item.json.id }};",
+        "options": {}
+      },
+      "id": "update-fetch-error",
+      "name": "Set Fetch Error",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [1540, 0],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "TabBacklog Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE tab_item\nSET status = 'llm_pending', updated_at = now()\nWHERE id = {{ $('Set Fetch Pending').item.json.id }}\nRETURNING id, url, page_title",
+        "options": {}
+      },
+      "id": "update-llm-pending",
+      "name": "Set LLM Pending",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [1980, -200],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "TabBacklog Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ENRICHMENT_SERVICE_URL }}/enrich_tab",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"url\": \"{{ $('Set Fetch Pending').item.json.url }}\",\n  \"title\": {{ $('Call Parser Service').item.json.title ? '\"' + $('Call Parser Service').item.json.title.replace(/\"/g, '\\\\\"') + '\"' : 'null' }},\n  \"site_kind\": \"{{ $('Call Parser Service').item.json.site_kind }}\",\n  \"text\": {{ $('Call Parser Service').item.json.text_full ? '\"' + $('Call Parser Service').item.json.text_full.replace(/\"/g, '\\\\\"').replace(/\\n/g, '\\\\n').substring(0, 8000) + '\"' : 'null' }},\n  \"word_count\": {{ $('Call Parser Service').item.json.word_count || 0 }},\n  \"video_seconds\": {{ $('Call Parser Service').item.json.video_seconds || 0 }}\n}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "call-enrichment",
+      "name": "Call Enrichment Service",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2200, -200],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-enrich-success",
+              "leftValue": "={{ $json.enrichment }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-enrich-success",
+      "name": "Enrich Success?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2420, -200]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO tab_enrichment (tab_id, summary, content_type, est_read_min, priority, raw_meta, model_name)\nVALUES (\n  {{ $('Set Fetch Pending').item.json.id }},\n  '{{ $json.enrichment.summary.replace(/'/g, \"''\") }}',\n  '{{ $json.enrichment.content_type }}',\n  {{ $json.enrichment.est_read_min || \"NULL\" }},\n  {{ $json.enrichment.priority ? \"'\" + $json.enrichment.priority + \"'\" : \"NULL\" }},\n  '{{ JSON.stringify({tags: $json.enrichment.tags, projects: $json.enrichment.projects}) }}',\n  '{{ $json.model_name }}'\n)\nON CONFLICT (tab_id) DO UPDATE SET\n  summary = EXCLUDED.summary,\n  content_type = EXCLUDED.content_type,\n  est_read_min = EXCLUDED.est_read_min,\n  priority = EXCLUDED.priority,\n  raw_meta = EXCLUDED.raw_meta,\n  model_name = EXCLUDED.model_name,\n  updated_at = now();",
+        "options": {}
+      },
+      "id": "upsert-enrichment",
+      "name": "Upsert Enrichment",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [2640, -300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "TabBacklog Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO tab_enrichment_history (tab_id, summary, content_type, est_read_min, priority, raw_meta, model_name, run_started_at, run_finished_at)\nVALUES (\n  {{ $('Set Fetch Pending').item.json.id }},\n  '{{ $json.enrichment.summary.replace(/'/g, \"''\") }}',\n  '{{ $json.enrichment.content_type }}',\n  {{ $json.enrichment.est_read_min || \"NULL\" }},\n  {{ $json.enrichment.priority ? \"'\" + $json.enrichment.priority + \"'\" : \"NULL\" }},\n  '{{ JSON.stringify({tags: $json.enrichment.tags, projects: $json.enrichment.projects}) }}',\n  '{{ $json.model_name }}',\n  now() - interval '2 seconds',\n  now()\n);",
+        "options": {}
+      },
+      "id": "insert-history",
+      "name": "Insert History",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [2860, -300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "TabBacklog Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Upsert tags from enrichment\nWITH tag_data AS (\n  SELECT unnest(ARRAY{{ JSON.stringify($json.enrichment.tags || []) }}::text[]) as tag_name\n),\nuser_info AS (\n  SELECT user_id FROM tab_item WHERE id = {{ $('Set Fetch Pending').item.json.id }}\n),\ninserted_tags AS (\n  INSERT INTO tag (user_id, name, kind)\n  SELECT u.user_id, t.tag_name, 'auto'\n  FROM tag_data t, user_info u\n  ON CONFLICT (user_id, name) WHERE deleted_at IS NULL DO NOTHING\n  RETURNING id, name\n),\nall_tags AS (\n  SELECT id, name FROM inserted_tags\n  UNION\n  SELECT t.id, t.name FROM tag t, user_info u, tag_data td\n  WHERE t.user_id = u.user_id AND t.name = td.tag_name AND t.deleted_at IS NULL\n)\nINSERT INTO tab_tag (tab_id, tag_id)\nSELECT {{ $('Set Fetch Pending').item.json.id }}, at.id\nFROM all_tags at\nON CONFLICT (tab_id, tag_id) DO NOTHING;",
+        "options": {}
+      },
+      "id": "upsert-tags",
+      "name": "Upsert Tags",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [3080, -300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "TabBacklog Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE tab_item\nSET status = 'enriched', updated_at = now()\nWHERE id = {{ $('Set Fetch Pending').item.json.id }};\n\nINSERT INTO event_log (user_id, event_type, entity_type, entity_id, details)\nSELECT user_id, 'llm_enrich_success', 'tab_item', id,\n  jsonb_build_object(\n    'model', '{{ $json.model_name }}',\n    'content_type', '{{ $json.enrichment.content_type }}',\n    'source', 'n8n_workflow'\n  )\nFROM tab_item WHERE id = {{ $('Set Fetch Pending').item.json.id }};",
+        "options": {}
+      },
+      "id": "update-enriched-status",
+      "name": "Set Status Enriched",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [3300, -300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "TabBacklog Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE tab_item\nSET status = 'llm_error',\n    last_error = '{{ ($json.error || $json.detail || \"Unknown LLM error\").replace(/'/g, \"''\") }}',\n    error_at = now(),\n    updated_at = now()\nWHERE id = {{ $('Set Fetch Pending').item.json.id }};\n\nINSERT INTO event_log (user_id, event_type, entity_type, entity_id, details)\nSELECT user_id, 'llm_enrich_error', 'tab_item', id,\n  jsonb_build_object(\n    'error', '{{ ($json.error || \"Unknown error\").replace(/'/g, \"''\") }}',\n    'source', 'n8n_workflow'\n  )\nFROM tab_item WHERE id = {{ $('Set Fetch Pending').item.json.id }};",
+        "options": {}
+      },
+      "id": "update-llm-error",
+      "name": "Set LLM Error",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [2640, -100],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred",
+          "name": "TabBacklog Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "no-op-end",
+      "name": "No Tabs to Process",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [660, 100]
+    },
+    {
+      "parameters": {
+        "values": {
+          "number": [
+            {
+              "name": "batch_size",
+              "value": 10
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-config",
+      "name": "Set Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [220, 200]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "merge-for-loop",
+      "name": "Merge Back",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [3520, -200]
+    }
+  ],
+  "connections": {
+    "Every 10 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Get New Tabs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get New Tabs": {
+      "main": [
+        [
+          {
+            "node": "Has Tabs?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Tabs?": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Tabs to Process",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split In Batches": {
+      "main": [
+        [
+          {
+            "node": "Set Fetch Pending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Fetch Pending": {
+      "main": [
+        [
+          {
+            "node": "Call Parser Service",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Parser Service": {
+      "main": [
+        [
+          {
+            "node": "Parse Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Success?": {
+      "main": [
+        [
+          {
+            "node": "Insert Parsed Content",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set Fetch Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Parsed Content": {
+      "main": [
+        [
+          {
+            "node": "Set Status Parsed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Status Parsed": {
+      "main": [
+        [
+          {
+            "node": "Set LLM Pending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Fetch Error": {
+      "main": [
+        [
+          {
+            "node": "Merge Back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set LLM Pending": {
+      "main": [
+        [
+          {
+            "node": "Call Enrichment Service",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Enrichment Service": {
+      "main": [
+        [
+          {
+            "node": "Enrich Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrich Success?": {
+      "main": [
+        [
+          {
+            "node": "Upsert Enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set LLM Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Enrichment": {
+      "main": [
+        [
+          {
+            "node": "Insert History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert History": {
+      "main": [
+        [
+          {
+            "node": "Upsert Tags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Tags": {
+      "main": [
+        [
+          {
+            "node": "Set Status Enriched",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Status Enriched": {
+      "main": [
+        [
+          {
+            "node": "Merge Back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set LLM Error": {
+      "main": [
+        [
+          {
+            "node": "Merge Back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Back": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "tabbacklog",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    }
+  ],
+  "triggerCount": 1,
+  "active": false,
+  "pinData": {}
+}

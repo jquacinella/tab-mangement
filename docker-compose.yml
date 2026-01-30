@@ -140,6 +140,10 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - POSTGRES_DB=${POSTGRES_DB:-tabbacklog}
+
+      # Service URLs for workflows
+      - PARSER_SERVICE_URL=http://parser-service:8001
+      - ENRICHMENT_SERVICE_URL=http://enrichment-service:8002
     volumes:
       - n8n_data:/home/node/.n8n
       - ./n8n/workflows:/home/node/.n8n/workflows:ro
