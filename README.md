@@ -1,303 +1,373 @@
-# TabBacklog v1 - Quick Reference Guide
+# TabBacklog v1
 
-## File Inventory
+A Firefox tab management system that captures browser tabs into a structured database, enriches them with LLM-generated summaries and metadata, and provides a searchable web interface for processing and exporting.
 
-### Core Documentation
-- **CLAUDE_CODE_SPEC.md** - Complete implementation specification
-- **README.md** - This file, quick reference
+## Features
 
-### Database Files
-- **01_core_tables.sql** - Main database schema with all tables
-- **02_extensions_indexes.sql** - PostgreSQL extensions, indexes, and views
-- **03_seed_data.sql** - Seed data for project tags and initialization
+- **Ingest**: Parse Firefox bookmarks HTML exports and import tabs from `Session-*` folders
+- **Parse**: Fetch and extract content from URLs with site-specific parsers (YouTube, Twitter, generic HTML)
+- **Enrich**: Generate summaries, classify content types, and assign tags using LLM (DSPy + Llama)
+- **Search**: Fuzzy search with pg_trgm and semantic search with pgvector embeddings
+- **Manage**: Web UI with filtering, bulk selection, and processing workflow
+- **Export**: Export to JSON, Markdown, or Obsidian-compatible format
 
-### Python Files
-- **requirements.txt** - All Python dependencies
-- **config.py** - Shared configuration module
-- **parser_base.py** - Base parser class and registry system
-- **.env.example** - Environment variables template
+## Architecture
 
-## Quick Start for Claude Code
-
-### Step 1: Set Up Database
-```sql
--- Run these in order
-\i 01_core_tables.sql
-\i 02_extensions_indexes.sql
-\i 03_seed_data.sql
-
--- Initialize a user
-SELECT initialize_user_data('YOUR_USER_ID'::uuid);
+```
+Firefox Bookmarks Export
+    │
+    ▼
+┌─────────────────┐
+│  Ingest CLI     │ ──► PostgreSQL/Supabase
+└─────────────────┘
+    │
+    ▼
+┌─────────────────┐
+│ n8n Orchestrator│
+└────────┬────────┘
+         │
+    ┌────┴────┐
+    ▼         ▼
+┌───────┐ ┌────────┐
+│Parser │ │Enricher│
+│Service│ │Service │
+└───────┘ └────────┘
+    │         │
+    └────┬────┘
+         ▼
+┌─────────────────┐
+│    Web UI       │ ◄── Filter, Search, Export
+└─────────────────┘
 ```
 
-### Step 2: Set Up Python Environment
+## Quick Start
+
+### Prerequisites
+
+- Python 3.11+
+- PostgreSQL 15+ with `pg_trgm` and `pgvector` extensions
+- Docker/Podman (optional, for containerized deployment)
+- n8n (for workflow orchestration)
+- Local LLM server (LM Studio, Ollama) or OpenAI-compatible API
+
+### 1. Database Setup
+
+```bash
+# Create database
+createdb tabbacklog
+
+# Run schema files in order
+psql tabbacklog < 01_core_tables.sql
+psql tabbacklog < 02_extensions_indexes.sql
+psql tabbacklog < 03_seed_data.sql
+
+# Initialize a user
+psql tabbacklog -c "SELECT initialize_user_data('YOUR_USER_UUID'::uuid);"
+```
+
+### 2. Environment Configuration
+
+```bash
+cp .env.example .env
+# Edit .env with your values
+```
+
+Key environment variables:
+```bash
+DATABASE_URL=postgresql://user:pass@localhost/tabbacklog
+DEFAULT_USER_ID=your-user-uuid
+LLM_API_BASE=http://localhost:1234/v1
+LLM_MODEL_NAME=llama-3.1-8b-instruct
+```
+
+### 3. Install Dependencies
+
 ```bash
 python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
+source venv/bin/activate
 pip install -r requirements.txt
-
-# Copy and configure environment
-cp .env.example .env
-# Edit .env with your actual values
 ```
 
-### Step 3: Build Services in Order
+### 4. Run Services
 
-#### 3.1: Ingest Script (Python CLI)
-**Location**: `ingest/`
-**Files**: `cli.py`, `firefox_parser.py`, `db.py`
-**Purpose**: Parse Firefox bookmarks HTML and insert into database
+```bash
+# Ingest tabs from Firefox bookmarks
+python -m ingest.cli ingest --file ~/bookmarks.html --user-id YOUR_UUID
 
-#### 3.2: Parser Service (FastAPI)
-**Location**: `parser_service/`
-**Files**: `main.py`, `parsers/*.py`, `models.py`
-**Purpose**: HTTP service that fetches and parses URLs
-**Endpoint**: `POST /fetch_parse`
+# Start Parser Service (port 8001)
+uvicorn parser_service.main:app --port 8001
 
-Implement parsers:
-- `GenericHtmlParser` - Extract title and text from any HTML
-- `YouTubeParser` - Use yt-dlp to get video metadata
-- `TwitterParser` - Extract tweet content from meta tags
+# Start Enrichment Service (port 8002)
+uvicorn enrichment_service.main:app --port 8002
 
-#### 3.3: Enrichment Service (FastAPI + DSPy)
-**Location**: `enrichment_service/`
-**Files**: `main.py`, `dspy_setup.py`, `models.py`
-**Purpose**: LLM enrichment with structured output
-**Endpoint**: `POST /enrich_tab`
-
-Use DSPy TypedPredictor with Pydantic model for:
-- Summary
-- Content type classification
-- Tag generation
-- Project assignment
-- Reading time estimation
-
-#### 3.4: n8n Workflow
-**Location**: `n8n/workflows/`
-**File**: `enrich_tabs.json`
-**Purpose**: Orchestrate fetch → parse → enrich pipeline
-
-Workflow steps:
-1. Cron trigger (every 10 min)
-2. Query new tabs from DB
-3. Call parser service
-4. Call enrichment service
-5. Update database
-6. Log events
-7. Send error emails
-
-#### 3.5: Web UI (FastAPI + HTMX)
-**Location**: `web_ui/`
-**Files**: `main.py`, `routes/*.py`, `templates/*.html`
-**Purpose**: Browse, filter, and export tabs
-
-Features:
-- Filter by content type, project, status, processed
-- Fuzzy search with trigram
-- Toggle processed status
-- Export to JSON/Markdown
-- HTMX for dynamic updates
-
-### Step 4: Containerize
-Create Dockerfiles for each service and docker-compose.yml
-
-## Implementation Checklist
-
-### Phase 1: Database ✓
-- [x] Core tables schema
-- [x] Extensions and indexes
-- [x] Seed data and functions
-- [ ] Run migrations
-- [ ] Initialize test user
-
-### Phase 2: Ingest Script
-- [ ] Parse Firefox bookmarks HTML
-- [ ] Database insert logic
-- [ ] Event logging
-- [ ] CLI interface
-
-### Phase 3: Parser Service
-- [ ] Base parser class ✓
-- [ ] Parser registry ✓
-- [ ] GenericHtmlParser
-- [ ] YouTubeParser
-- [ ] TwitterParser
-- [ ] FastAPI endpoints
-- [ ] Error handling
-
-### Phase 4: Enrichment Service
-- [ ] DSPy configuration
-- [ ] Pydantic models
-- [ ] TypedPredictor setup
-- [ ] FastAPI endpoints
-- [ ] Retry logic
-
-### Phase 5: n8n Workflow
-- [ ] Workflow JSON
-- [ ] Postgres nodes
-- [ ] HTTP nodes
-- [ ] Error handling
-- [ ] Email notifications
-
-### Phase 6: Web UI
-- [ ] FastAPI app skeleton
-- [ ] Base templates
-- [ ] Tab listing endpoint
-- [ ] Filter implementation
-- [ ] Search implementation
-- [ ] Toggle processed
-- [ ] Export JSON
-- [ ] Export Markdown
-
-### Phase 7: Search
-- [ ] Fuzzy search queries
-- [ ] Semantic search endpoint
-- [ ] Embedding generation job
-
-### Phase 8: Deployment
-- [ ] Dockerfiles
-- [ ] docker-compose.yml
-- [ ] Health checks
-- [ ] Logging
-- [ ] Documentation
-
-## Key Design Patterns
-
-### Parser Plugin Pattern
-```python
-# Register parsers in order of specificity
-register_parser(YouTubeParser())
-register_parser(TwitterParser())
-register_parser(GenericHtmlParser())  # Fallback
-
-# Parse automatically selects the right parser
-result = parse_page(url, html_content)
+# Start Web UI (port 8000)
+uvicorn web_ui.main:app --port 8000
 ```
 
-### DSPy Structured Output
-```python
-# Define schema with Pydantic
-class Enrichment(BaseModel):
-    summary: str
-    content_type: Literal["article", "video", ...]
-    # ...
+### 5. Docker Deployment
 
-# Use TypedPredictor
-predictor = TypedPredictor(EnrichSignature)
-result = predictor(url=url, title=title, text=text)
+```bash
+# Start all services
+docker-compose up -d
+
+# Access services:
+# - Web UI: http://localhost:8000
+# - n8n: http://localhost:5678
+# - Parser API: http://localhost:8001
+# - Enrichment API: http://localhost:8002
 ```
 
-### Event Logging
-```python
-# Log everything to event_log table
-INSERT INTO event_log (user_id, event_type, entity_type, entity_id, details)
-VALUES (:user_id, 'tab_created', 'tab_item', :tab_id, :details_json)
-```
-
-### Status State Machine
-```
-new → fetch_pending → parsed → llm_pending → enriched
-   ↓                     ↓                       ↓
-fetch_error        parse_error            llm_error
-```
-
-## Testing Strategy
-
-### Unit Tests
-- Parser plugins with sample HTML
-- DSPy enrichment with mock LLM
-- Database operations
-
-### Integration Tests
-- Full pipeline: ingest → parse → enrich
-- n8n workflow execution
-- Web UI endpoints
-
-### Manual Testing
-1. Export Firefox bookmarks
-2. Run ingest script
-3. Trigger n8n workflow
-4. Check Web UI
-5. Export to Markdown
-
-## Common Issues & Solutions
-
-### Database Connection
-- Check DATABASE_URL format
-- Verify pg_trgm and vector extensions installed
-- Test connection: `psql $DATABASE_URL`
-
-### LLM Service
-- Ensure LM Studio/Ollama running
-- Test API: `curl $LLM_API_BASE/models`
-- Check model name matches
-
-### Parser Failures
-- Add logging to see which parser matched
-- Check HTML structure for site changes
-- Add more specific parsers as needed
-
-### n8n Workflow
-- Test each node individually
-- Check error nodes configured
-- Verify database credentials
-
-## Environment Variable Priority
-
-1. **DATABASE_URL** - Must be set first
-2. **LLM_API_BASE** & **LLM_MODEL_NAME** - Required for enrichment
-3. **DEFAULT_USER_ID** - Needed for single-user setup
-4. **Service URLs** - For n8n orchestration
-
-## File Structure to Create
+## Project Structure
 
 ```
 tabbacklog/
-├── database/
-│   └── schema/
-│       ├── 01_core_tables.sql ✓
-│       ├── 02_extensions_indexes.sql ✓
-│       └── 03_seed_data.sql ✓
-├── ingest/
-│   ├── cli.py
-│   ├── firefox_parser.py
-│   └── db.py
-├── parser_service/
-│   ├── main.py
-│   ├── parsers/
-│   │   ├── base.py ✓
-│   │   ├── registry.py ✓
-│   │   ├── generic.py
-│   │   ├── youtube.py
-│   │   └── twitter.py
+├── 01_core_tables.sql          # Database schema
+├── 02_extensions_indexes.sql   # Extensions and indexes
+├── 03_seed_data.sql            # Seed data functions
+├── config.py                   # Shared configuration
+├── requirements.txt            # Python dependencies
+├── docker-compose.yml          # Container orchestration
+│
+├── ingest/                     # Firefox bookmarks ingestion
+│   ├── cli.py                  # CLI entry point
+│   ├── firefox_parser.py       # Bookmarks HTML parser
+│   └── db.py                   # Database operations
+│
+├── parser_service/             # URL fetch and parse service
+│   ├── main.py                 # FastAPI app
+│   ├── models.py               # Pydantic models
+│   ├── Dockerfile
+│   └── parsers/
+│       ├── base.py             # BaseParser, ParsedPage
+│       ├── registry.py         # Parser registry
+│       ├── generic.py          # Generic HTML parser
+│       ├── youtube.py          # YouTube parser (yt-dlp)
+│       └── twitter.py          # Twitter/X parser
+│
+├── enrichment_service/         # LLM enrichment service
+│   ├── main.py                 # FastAPI app
+│   ├── dspy_setup.py           # DSPy configuration
+│   ├── models.py               # Enrichment schema
 │   └── Dockerfile
-├── enrichment_service/
-│   ├── main.py
-│   ├── dspy_setup.py
-│   └── Dockerfile
-├── web_ui/
-│   ├── main.py
+│
+├── web_ui/                     # HTMX web interface
+│   ├── main.py                 # FastAPI app
+│   ├── db.py                   # Async database ops
+│   ├── models.py               # Display models
+│   ├── Dockerfile
 │   ├── routes/
+│   │   ├── tabs.py             # Tab listing/filtering
+│   │   ├── export.py           # Export endpoints
+│   │   └── search.py           # Semantic search
 │   ├── templates/
-│   └── Dockerfile
-├── n8n/
-│   └── workflows/
-│       └── enrich_tabs.json
-├── shared/
-│   ├── config.py ✓
-│   └── db.py
-├── requirements.txt ✓
-├── .env.example ✓
-└── docker-compose.yml
+│   │   ├── base.html
+│   │   ├── index.html
+│   │   ├── stats.html
+│   │   └── fragments/
+│   └── static/css/
+│
+├── shared/                     # Shared utilities
+│   └── search.py               # Embedding generation
+│
+└── n8n/
+    ├── README.md               # Workflow documentation
+    └── workflows/
+        └── enrich_tabs.json    # Main enrichment workflow
 ```
 
-## Next Steps
+## Services
 
-Start with **Phase 2: Ingest Script** since database schema is complete.
+### Ingest CLI
 
-1. Create `ingest/firefox_parser.py` to parse bookmarks HTML
-2. Create `ingest/db.py` with database insert operations
-3. Create `ingest/cli.py` with Click CLI interface
-4. Test with actual Firefox export
+Parse Firefox bookmarks and insert tabs into the database.
 
-Then move to **Phase 3: Parser Service** for the core parsing logic.
+```bash
+# Import bookmarks
+python -m ingest.cli ingest --file bookmarks.html --user-id UUID
+
+# Preview without importing
+python -m ingest.cli ingest --file bookmarks.html --user-id UUID --dry-run
+
+# Show file statistics
+python -m ingest.cli stats --file bookmarks.html
+
+# Check database status
+python -m ingest.cli status --user-id UUID
+```
+
+### Parser Service (Port 8001)
+
+Fetch URLs and extract structured content.
+
+```bash
+# Fetch and parse a URL
+curl -X POST http://localhost:8001/fetch_parse \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+
+# Health check
+curl http://localhost:8001/health
+```
+
+**Supported parsers:**
+- `YouTubeParser`: Uses yt-dlp for video metadata
+- `TwitterParser`: Extracts tweets from meta tags
+- `GenericHtmlParser`: Fallback for all HTML pages
+
+### Enrichment Service (Port 8002)
+
+Generate LLM-based metadata using DSPy.
+
+```bash
+# Enrich a tab
+curl -X POST http://localhost:8002/enrich_tab \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "title": "Example Article",
+    "site_kind": "generic_html",
+    "text": "Article content..."
+  }'
+```
+
+**Enrichment output:**
+- `summary`: 2-3 sentence summary
+- `content_type`: article, video, paper, code_repo, reference, misc
+- `tags`: Relevant hashtags
+- `projects`: Category classification
+- `est_read_min`: Estimated reading time
+- `priority`: high, medium, low
+
+### Web UI (Port 8000)
+
+HTMX-powered interface for managing tabs.
+
+**Features:**
+- Filter by status, content type, processed state, read time
+- Fuzzy search with pg_trgm
+- Semantic search with embeddings (toggle AI mode)
+- Bulk selection and export
+- Mark tabs as processed
+- Statistics dashboard
+
+**Routes:**
+- `GET /` - Main tab listing
+- `GET /tabs` - HTMX fragment for filtered tabs
+- `POST /tabs/{id}/toggle_processed` - Toggle processed flag
+- `GET /stats` - Statistics page
+- `POST /export/json` - Export as JSON
+- `POST /export/markdown` - Export as Markdown
+- `POST /export/obsidian` - Export for Obsidian
+- `GET /search/semantic?q=query` - Semantic search
+- `POST /search/generate-embeddings` - Generate embeddings
+
+### n8n Workflow
+
+Automated pipeline that runs every 10 minutes:
+
+1. Query new tabs (`status = 'new'`)
+2. Update status to `fetch_pending`
+3. Call Parser Service
+4. Insert parsed content
+5. Update status to `llm_pending`
+6. Call Enrichment Service
+7. Store enrichment and tags
+8. Update status to `enriched`
+9. Log all events
+
+**Status flow:**
+```
+new → fetch_pending → parsed → llm_pending → enriched
+              ↘                     ↘
+           fetch_error           llm_error
+```
+
+## Database Schema
+
+### Core Tables
+
+| Table | Purpose |
+|-------|---------|
+| `tab_item` | Main tab record with URL, title, status |
+| `tab_parsed` | Extracted content from parser |
+| `tab_enrichment` | LLM-generated metadata |
+| `tab_enrichment_history` | Enrichment run history |
+| `tag` | User-defined and auto-generated tags |
+| `tab_tag` | Tab-tag relationships |
+| `tab_embedding` | Vector embeddings for semantic search |
+| `event_log` | Audit trail for all operations |
+
+### Key Indexes
+
+- Trigram indexes on `page_title`, `summary` for fuzzy search
+- Vector index on `embedding` for semantic search
+- Composite indexes for common query patterns
+
+## Configuration
+
+### Environment Variables
+
+```bash
+# Database
+DATABASE_URL=postgresql://user:pass@host/db
+
+# User (single-user mode)
+DEFAULT_USER_ID=uuid
+
+# LLM Service
+LLM_API_BASE=http://localhost:1234/v1
+LLM_API_KEY=dummy_key
+LLM_MODEL_NAME=llama-3.1-8b-instruct
+LLM_TIMEOUT=60
+MAX_RETRIES=3
+
+# Embeddings (for semantic search)
+EMBEDDING_API_BASE=http://localhost:1234/v1
+EMBEDDING_MODEL_NAME=text-embedding-nomic-embed-text-v1.5
+
+# Services
+PARSER_SERVICE_URL=http://localhost:8001
+ENRICHMENT_SERVICE_URL=http://localhost:8002
+```
+
+## Development
+
+### Running Tests
+
+```bash
+pytest tests/
+```
+
+### Code Style
+
+```bash
+black .
+ruff check .
+mypy .
+```
+
+### Adding a New Parser
+
+1. Create `parser_service/parsers/mysite.py`
+2. Extend `BaseParser` with `match()` and `parse()` methods
+3. Register in `parser_service/parsers/registry.py`
+
+```python
+class MySiteParser(BaseParser):
+    def match(self, url: str) -> bool:
+        return "mysite.com" in url
+
+    def parse(self, url: str, html_content: str) -> ParsedPage:
+        # Extract content
+        return ParsedPage(
+            site_kind="mysite",
+            title=title,
+            text_full=text,
+            word_count=len(text.split()),
+            metadata={"custom": "data"},
+        )
+```
+
+## License
+
+MIT
