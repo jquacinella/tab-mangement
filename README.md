@@ -57,9 +57,9 @@ Firefox Bookmarks Export
 createdb tabbacklog
 
 # Run schema files in order
-psql tabbacklog < 01_core_tables.sql
-psql tabbacklog < 02_extensions_indexes.sql
-psql tabbacklog < 03_seed_data.sql
+psql tabbacklog < database/schema/01_core_tables.sql
+psql tabbacklog < database/schema/02_extensions_indexes.sql
+psql tabbacklog < database/schema/03_seed_data.sql
 
 # Initialize a user
 psql tabbacklog -c "SELECT initialize_user_data('YOUR_USER_UUID'::uuid);"
@@ -121,12 +121,17 @@ docker-compose up -d
 
 ```
 tabbacklog/
-├── 01_core_tables.sql          # Database schema
-├── 02_extensions_indexes.sql   # Extensions and indexes
-├── 03_seed_data.sql            # Seed data functions
+├── .env.example                # Environment variables template
 ├── config.py                   # Shared configuration
 ├── requirements.txt            # Python dependencies
 ├── docker-compose.yml          # Container orchestration
+├── pytest.ini                  # Pytest configuration
+│
+├── database/
+│   └── schema/
+│       ├── 01_core_tables.sql      # Database schema
+│       ├── 02_extensions_indexes.sql # Extensions and indexes
+│       └── 03_seed_data.sql        # Seed data functions
 │
 ├── ingest/                     # Firefox bookmarks ingestion
 │   ├── cli.py                  # CLI entry point
@@ -164,15 +169,28 @@ tabbacklog/
 │   │   ├── index.html
 │   │   ├── stats.html
 │   │   └── fragments/
-│   └── static/css/
+│   │       ├── tab_row.html    # Single tab row
+│   │       ├── tab_rows.html   # Tab rows container
+│   │       └── tab_detail.html # Tab detail modal
+│   └── static/
+│       └── css/
+│           └── style.css       # Application styles
 │
 ├── shared/                     # Shared utilities
 │   └── search.py               # Embedding generation
 │
-└── n8n/
-    ├── README.md               # Workflow documentation
-    └── workflows/
-        └── enrich_tabs.json    # Main enrichment workflow
+├── n8n/
+│   ├── README.md               # Workflow documentation
+│   └── workflows/
+│       └── enrich_tabs.json    # Main enrichment workflow
+│
+└── tests/                      # Test suite
+    ├── README.md               # Test documentation
+    ├── conftest.py             # Shared fixtures
+    ├── e2e/                    # Playwright browser tests
+    │   ├── test_web_ui.py      # Web UI interaction tests
+    │   └── test_api_endpoints.py # API endpoint tests
+    └── unit/                   # Unit tests
 ```
 
 ## Services
@@ -330,13 +348,141 @@ PARSER_SERVICE_URL=http://localhost:8001
 ENRICHMENT_SERVICE_URL=http://localhost:8002
 ```
 
+## LLM Integration Setup
+
+TabBacklog uses an OpenAI-compatible API for two purposes:
+1. **Enrichment** - Generate summaries, classify content, assign tags (chat completions)
+2. **Embeddings** - Create vectors for semantic search (embeddings endpoint)
+
+Any provider that supports the OpenAI API format will work.
+
+### LM Studio (Local)
+
+[LM Studio](https://lmstudio.ai/) provides a local OpenAI-compatible server.
+
+1. Download and install LM Studio
+2. Download a model (e.g., `llama-3.1-8b-instruct`, `mistral-7b-instruct`)
+3. Start the local server (default port 1234)
+4. For embeddings, also load an embedding model (e.g., `nomic-embed-text-v1.5`)
+
+```bash
+# .env configuration for LM Studio
+LLM_API_BASE=http://localhost:1234/v1
+LLM_API_KEY=lm-studio
+LLM_MODEL_NAME=llama-3.1-8b-instruct
+
+EMBEDDING_API_BASE=http://localhost:1234/v1
+EMBEDDING_API_KEY=lm-studio
+EMBEDDING_MODEL_NAME=text-embedding-nomic-embed-text-v1.5
+```
+
+### Ollama (Local)
+
+[Ollama](https://ollama.ai/) is another popular local LLM runner.
+
+1. Install Ollama
+2. Pull models: `ollama pull llama3.1` and `ollama pull nomic-embed-text`
+3. Ollama runs on port 11434 by default
+
+```bash
+# .env configuration for Ollama
+LLM_API_BASE=http://localhost:11434/v1
+LLM_API_KEY=ollama
+LLM_MODEL_NAME=llama3.1
+
+EMBEDDING_API_BASE=http://localhost:11434/v1
+EMBEDDING_API_KEY=ollama
+EMBEDDING_MODEL_NAME=nomic-embed-text
+```
+
+### OpenRouter (Cloud)
+
+[OpenRouter](https://openrouter.ai/) provides access to many models via a unified API.
+
+1. Create an account at openrouter.ai
+2. Generate an API key
+3. Choose your preferred models
+
+```bash
+# .env configuration for OpenRouter
+LLM_API_BASE=https://openrouter.ai/api/v1
+LLM_API_KEY=sk-or-v1-your-api-key-here
+LLM_MODEL_NAME=anthropic/claude-3-haiku
+
+# OpenRouter supports some embedding models, or use a different provider
+EMBEDDING_API_BASE=https://openrouter.ai/api/v1
+EMBEDDING_API_KEY=sk-or-v1-your-api-key-here
+EMBEDDING_MODEL_NAME=openai/text-embedding-3-small
+```
+
+**Note:** OpenRouter charges per token. Check pricing at openrouter.ai/models.
+
+### Mixed Configuration
+
+You can use different providers for enrichment and embeddings:
+
+```bash
+# Use OpenRouter for chat (better models)
+LLM_API_BASE=https://openrouter.ai/api/v1
+LLM_API_KEY=sk-or-v1-your-key
+LLM_MODEL_NAME=anthropic/claude-3-haiku
+
+# Use local Ollama for embeddings (free, fast)
+EMBEDDING_API_BASE=http://localhost:11434/v1
+EMBEDDING_API_KEY=ollama
+EMBEDDING_MODEL_NAME=nomic-embed-text
+```
+
+### Recommended Models
+
+| Use Case | Model | Notes |
+|----------|-------|-------|
+| Enrichment (local) | `llama-3.1-8b-instruct` | Good balance of speed and quality |
+| Enrichment (cloud) | `anthropic/claude-3-haiku` | Fast, affordable, high quality |
+| Embeddings (local) | `nomic-embed-text-v1.5` | Open source, good quality |
+| Embeddings (cloud) | `text-embedding-3-small` | OpenAI's efficient embedding model |
+
+### Testing the Connection
+
+After configuration, test that the LLM is reachable:
+
+```bash
+# Start the enrichment service
+uvicorn enrichment_service.main:app --port 8002
+
+# Check health (includes LLM status)
+curl http://localhost:8002/health
+```
+
 ## Development
 
 ### Running Tests
 
 ```bash
-pytest tests/
+# Install test dependencies
+pip install -r requirements.txt
+
+# Install Playwright browsers
+playwright install
+
+# Run all tests
+pytest
+
+# Run E2E tests only
+pytest tests/e2e/ -m e2e
+
+# Run with browser visible
+pytest tests/e2e/ -m e2e --headed
+
+# Run specific test file
+pytest tests/e2e/test_web_ui.py -v
+
+# Run with coverage
+pytest --cov=web_ui --cov-report=html
 ```
+
+**Note:** E2E tests require the web server running on `http://localhost:8000`.
+Set `TEST_BASE_URL` environment variable to use a different URL.
 
 ### Code Style
 
