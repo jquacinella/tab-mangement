@@ -32,8 +32,8 @@ services:
   # ============================================================================
   parser-service:
     build:
-      context: ./parser_service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: parser_service/Dockerfile
     container_name: tabbacklog-parser
     environment:
       - APP_ENV=${APP_ENV:-development}
@@ -56,8 +56,8 @@ services:
   # ============================================================================
   enrichment-service:
     build:
-      context: ./enrichment_service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: enrichment_service/Dockerfile
     container_name: tabbacklog-enrichment
     environment:
       - APP_ENV=${APP_ENV:-development}
@@ -85,8 +85,8 @@ services:
   # ============================================================================
   web-ui:
     build:
-      context: ./web_ui
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: web_ui/Dockerfile
     container_name: tabbacklog-ui
     environment:
       - APP_ENV=${APP_ENV:-development}
