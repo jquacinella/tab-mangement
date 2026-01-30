@@ -57,9 +57,9 @@ Firefox Bookmarks Export
 createdb tabbacklog
 
 # Run schema files in order
-psql tabbacklog < 01_core_tables.sql
-psql tabbacklog < 02_extensions_indexes.sql
-psql tabbacklog < 03_seed_data.sql
+psql tabbacklog < database/schema/01_core_tables.sql
+psql tabbacklog < database/schema/02_extensions_indexes.sql
+psql tabbacklog < database/schema/03_seed_data.sql
 
 # Initialize a user
 psql tabbacklog -c "SELECT initialize_user_data('YOUR_USER_UUID'::uuid);"
@@ -121,12 +121,17 @@ docker-compose up -d
 
 ```
 tabbacklog/
-├── 01_core_tables.sql          # Database schema
-├── 02_extensions_indexes.sql   # Extensions and indexes
-├── 03_seed_data.sql            # Seed data functions
+├── .env.example                # Environment variables template
 ├── config.py                   # Shared configuration
 ├── requirements.txt            # Python dependencies
 ├── docker-compose.yml          # Container orchestration
+├── pytest.ini                  # Pytest configuration
+│
+├── database/
+│   └── schema/
+│       ├── 01_core_tables.sql      # Database schema
+│       ├── 02_extensions_indexes.sql # Extensions and indexes
+│       └── 03_seed_data.sql        # Seed data functions
 │
 ├── ingest/                     # Firefox bookmarks ingestion
 │   ├── cli.py                  # CLI entry point
@@ -164,15 +169,28 @@ tabbacklog/
 │   │   ├── index.html
 │   │   ├── stats.html
 │   │   └── fragments/
-│   └── static/css/
+│   │       ├── tab_row.html    # Single tab row
+│   │       ├── tab_rows.html   # Tab rows container
+│   │       └── tab_detail.html # Tab detail modal
+│   └── static/
+│       └── css/
+│           └── style.css       # Application styles
 │
 ├── shared/                     # Shared utilities
 │   └── search.py               # Embedding generation
 │
-└── n8n/
-    ├── README.md               # Workflow documentation
-    └── workflows/
-        └── enrich_tabs.json    # Main enrichment workflow
+├── n8n/
+│   ├── README.md               # Workflow documentation
+│   └── workflows/
+│       └── enrich_tabs.json    # Main enrichment workflow
+│
+└── tests/                      # Test suite
+    ├── README.md               # Test documentation
+    ├── conftest.py             # Shared fixtures
+    ├── e2e/                    # Playwright browser tests
+    │   ├── test_web_ui.py      # Web UI interaction tests
+    │   └── test_api_endpoints.py # API endpoint tests
+    └── unit/                   # Unit tests
 ```
 
 ## Services
@@ -335,8 +353,30 @@ ENRICHMENT_SERVICE_URL=http://localhost:8002
 ### Running Tests
 
 ```bash
-pytest tests/
+# Install test dependencies
+pip install -r requirements.txt
+
+# Install Playwright browsers
+playwright install
+
+# Run all tests
+pytest
+
+# Run E2E tests only
+pytest tests/e2e/ -m e2e
+
+# Run with browser visible
+pytest tests/e2e/ -m e2e --headed
+
+# Run specific test file
+pytest tests/e2e/test_web_ui.py -v
+
+# Run with coverage
+pytest --cov=web_ui --cov-report=html
 ```
+
+**Note:** E2E tests require the web server running on `http://localhost:8000`.
+Set `TEST_BASE_URL` environment variable to use a different URL.
 
 ### Code Style
 
