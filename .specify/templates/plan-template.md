@@ -31,7 +31,35 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+**Reference**: [`.specify/memory/constitution.md`](../.specify/memory/constitution.md)
+
+### Core Principles Compliance
+
+- [ ] **Microservices Architecture**: Does this feature maintain service boundaries?
+- [ ] **Database-First Design**: Are schema changes versioned and ordered?
+- [ ] **Pipeline Status Tracking**: Are status transitions logged to event_log?
+- [ ] **Idempotency**: Can operations be safely retried?
+- [ ] **LLM Observability**: Are LLM calls traced through Phoenix?
+- [ ] **Parser Plugin System**: Do new parsers implement BaseParser?
+- [ ] **Configuration via Environment**: No hardcoded values?
+
+### Service Boundary Check
+
+Which services does this feature affect?
+- [ ] Ingest CLI
+- [ ] Parser Service (port 8001)
+- [ ] Enrichment Service (port 8002)
+- [ ] Web UI (port 8000)
+- [ ] n8n Orchestrator (port 5678)
+- [ ] Database Schema
+
+### Breaking Changes
+
+Does this feature introduce breaking changes?
+- [ ] Database schema changes (requires migration)
+- [ ] API contract changes (requires version bump)
+- [ ] Configuration changes (requires .env update)
+- [ ] None (backward compatible)
 
 ## Project Structure
 
@@ -56,39 +84,83 @@ specs/[###-feature]/
 -->
 
 ```text
-# [REMOVE IF UNUSED] Option 1: Single project (DEFAULT)
-src/
-├── models/
-├── services/
-├── cli/
-└── lib/
+# TabBacklog Project Structure (Microservices)
 
+# Ingest CLI
+ingest/
+├── cli.py                  # Click CLI commands
+├── firefox_parser.py       # HTML parsing
+└── db.py                   # Database operations
+
+# Parser Service (Port 8001)
+parser_service/
+├── main.py                 # FastAPI app
+├── models.py               # Pydantic models
+├── Dockerfile
+└── parsers/
+    ├── base.py             # BaseParser interface
+    ├── registry.py         # Parser registration
+    ├── generic.py          # Generic HTML parser
+    ├── youtube.py          # YouTube parser
+    └── twitter.py          # Twitter parser
+
+# Enrichment Service (Port 8002)
+enrichment_service/
+├── main.py                 # FastAPI app
+├── dspy_setup.py           # DSPy configuration
+├── models.py               # Enrichment schema
+└── Dockerfile
+
+# Web UI (Port 8000)
+web_ui/
+├── main.py                 # FastAPI app
+├── db.py                   # Async database ops
+├── models.py               # Display models
+├── Dockerfile
+├── routes/
+│   ├── tabs.py             # Tab listing/filtering
+│   ├── export.py           # Export endpoints
+│   └── search.py           # Semantic search
+├── templates/              # Jinja2 templates
+│   ├── base.html
+│   ├── index.html
+│   └── fragments/          # HTMX fragments
+└── static/
+    └── css/
+        └── style.css
+
+# Shared Utilities
+shared/
+└── search.py               # Embedding generation
+
+# Database Schema
+database/
+└── schema/
+    ├── 00_auth_setup.sql
+    ├── 01_extensions.sql
+    ├── 02_core_tables.sql
+    ├── 03_indexes_views.sql
+    └── 04_seed_data.sql
+
+# n8n Workflows
+n8n/
+├── README.md
+└── workflows/
+    └── enrich_tabs.json
+
+# Tests
 tests/
-├── contract/
-├── integration/
-└── unit/
+├── conftest.py             # Pytest fixtures
+├── e2e/                    # End-to-end tests
+│   ├── test_api_endpoints.py
+│   └── test_web_ui.py
+└── unit/                   # Unit tests
 
-# [REMOVE IF UNUSED] Option 2: Web application (when "frontend" + "backend" detected)
-backend/
-├── src/
-│   ├── models/
-│   ├── services/
-│   └── api/
-└── tests/
-
-frontend/
-├── src/
-│   ├── components/
-│   ├── pages/
-│   └── services/
-└── tests/
-
-# [REMOVE IF UNUSED] Option 3: Mobile + API (when "iOS/Android" detected)
-api/
-└── [same as backend above]
-
-ios/ or android/
-└── [platform-specific structure: feature modules, UI flows, platform tests]
+# Configuration
+config.py                   # Centralized configuration
+.env.example                # Environment template
+docker-compose.yml          # Container orchestration
+requirements.txt            # Python dependencies
 ```
 
 **Structure Decision**: [Document the selected structure and reference the real
