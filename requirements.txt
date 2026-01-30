@@ -21,7 +21,7 @@ lxml==5.1.0
 html5lib==1.1
 
 # Video/Content Extraction
-yt-dlp==2024.1.0
+yt-dlp==2026.1.29
 
 # LLM & DSPy
 dspy-ai==2.4.0
