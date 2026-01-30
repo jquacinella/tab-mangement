@@ -33,27 +33,45 @@ playwright install chromium
 
 The e2e tests require a running web server:
 
+**Option A: Using Docker (Recommended)**
+```bash
+# Start all services
+docker-compose up -d
+
+# Web UI will be available at http://localhost:8000
+```
+
+**Option B: Local Development**
 ```bash
 # Start the web UI (default port 8000)
 uvicorn web_ui.main:app --port 8000
-
-# Or use Docker
-docker-compose up web-ui
 ```
 
 ### 4. Database Setup
 
-Ensure the database is running and has the schema:
-
+**Option A: Using Docker (Automatic)**
 ```bash
-# Using local PostgreSQL
-psql -d tabbacklog < database/schema/01_core_tables.sql
-psql -d tabbacklog < database/schema/02_extensions_indexes.sql
-psql -d tabbacklog < database/schema/03_seed_data.sql
+# Database is automatically initialized when starting docker-compose
+docker-compose up -d postgres
+```
 
-# Initialize test user
+**Option B: Manual Setup**
+```bash
+# Create database
+createdb tabbacklog
+
+# Run schema files in order (IMPORTANT: order matters!)
+psql -d tabbacklog < database/schema/00_auth_setup.sql
+psql -d tabbacklog < database/schema/01_extensions.sql
+psql -d tabbacklog < database/schema/02_core_tables.sql
+psql -d tabbacklog < database/schema/03_indexes_views.sql
+psql -d tabbacklog < database/schema/04_seed_data.sql
+
+# Initialize test user (default user is auto-created)
 psql -d tabbacklog -c "SELECT initialize_user_data('00000000-0000-0000-0000-000000000000'::uuid);"
 ```
+
+**Note:** PostgreSQL must have `pgvector` extension support. Use `pgvector/pgvector:pg15` Docker image or install pgvector locally.
 
 ## Running Tests
 
@@ -194,12 +212,27 @@ Ensure the web server is running:
 curl http://localhost:8000/health
 ```
 
+If using Docker:
+```bash
+docker compose ps web-ui
+docker compose logs web-ui
+```
+
 ### Tests Fail with Database Error
 
 Check database connection:
 ```bash
+# For Docker
+docker compose ps postgres
+docker compose logs postgres
+
+# For local PostgreSQL
 psql $DATABASE_URL -c "SELECT 1"
 ```
+
+Ensure DATABASE_URL is correct:
+- Docker: `postgresql://postgres:postgres@postgres:5432/tabbacklog`
+- Local: `postgresql://postgres:postgres@localhost:5432/tabbacklog`
 
 ### Playwright Browser Issues
 
@@ -213,6 +246,21 @@ playwright install --force
 Run headless (default) for faster execution:
 ```bash
 pytest tests/e2e/  # No --headed flag
+```
+
+### Docker Network Issues
+
+If tests can't reach services:
+```bash
+# Ensure all services are healthy
+docker compose ps
+
+# Check service logs
+docker compose logs web-ui
+docker compose logs postgres
+
+# Restart services
+docker compose restart web-ui
 ```
 
 ## CI/CD Integration
@@ -230,7 +278,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        image: pgvector/pgvector:pg15
         env:
           POSTGRES_PASSWORD: postgres
         ports:
@@ -252,7 +300,11 @@ jobs:
       - name: Set up database
         run: |
           psql -h localhost -U postgres -d postgres -c "CREATE DATABASE tabbacklog"
-          psql -h localhost -U postgres -d tabbacklog < database/schema/01_core_tables.sql
+          psql -h localhost -U postgres -d tabbacklog < database/schema/00_auth_setup.sql
+          psql -h localhost -U postgres -d tabbacklog < database/schema/01_extensions.sql
+          psql -h localhost -U postgres -d tabbacklog < database/schema/02_core_tables.sql
+          psql -h localhost -U postgres -d tabbacklog < database/schema/03_indexes_views.sql
+          psql -h localhost -U postgres -d tabbacklog < database/schema/04_seed_data.sql
         env:
           PGPASSWORD: postgres
 

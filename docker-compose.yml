@@ -1,5 +1,3 @@
-version: '3.8'
-
 # TabBacklog v1 - Docker Compose Configuration
 # This orchestrates all services for the tab management system
 
@@ -8,7 +6,7 @@ services:
   # PostgreSQL Database (optional - use if not using Supabase)
   # ============================================================================
   postgres:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
     container_name: tabbacklog-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -45,10 +43,11 @@ services:
     networks:
       - tabbacklog-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health').read()"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 40s
     restart: unless-stopped
 
   # ============================================================================
@@ -66,16 +65,25 @@ services:
       - LLM_API_KEY=${LLM_API_KEY}
       - LLM_MODEL_NAME=${LLM_MODEL_NAME}
       - LLM_TIMEOUT=${LLM_TIMEOUT:-60}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.7}
       - MAX_RETRIES=${MAX_RETRIES:-3}
+      # Phoenix observability
+      - PHOENIX_COLLECTOR_ENDPOINT=${PHOENIX_COLLECTOR_ENDPOINT:-http://phoenix:6006}
+      - PHOENIX_PROJECT_NAME=${PHOENIX_PROJECT_NAME:-tabbacklog}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://phoenix:4317
     ports:
       - "8002:8002"
     networks:
       - tabbacklog-network
+    depends_on:
+      phoenix:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health').read()"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 40s
     restart: unless-stopped
     # If running LLM locally via LM Studio/Ollama, use host network
     # network_mode: host
@@ -108,10 +116,11 @@ services:
       enrichment-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 40s
     restart: unless-stopped
 
   # ============================================================================
@@ -161,6 +170,31 @@ services:
     restart: unless-stopped
 
   # ============================================================================
+  # Phoenix (Arize) - LLM Observability
+  # ============================================================================
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: tabbacklog-phoenix
+    ports:
+      - "6006:6006"
+      - "4317:4317"  # OTLP gRPC endpoint
+      - "4318:4318"  # OTLP HTTP endpoint
+    networks:
+      - tabbacklog-network
+    environment:
+      - PHOENIX_PORT=6006
+      - PHOENIX_HOST=0.0.0.0
+    volumes:
+      - phoenix_data:/phoenix
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:6006/healthz').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # ============================================================================
   # Optional: PgAdmin for database management
   # ============================================================================
   pgadmin:
@@ -193,6 +227,8 @@ volumes:
     name: tabbacklog-postgres-data
   n8n_data:
     name: tabbacklog-n8n-data
+  phoenix_data:
+    name: tabbacklog-phoenix-data
 
 # ============================================================================
 # Usage Instructions
@@ -228,6 +264,7 @@ volumes:
 #   - Parser API: http://localhost:8001
 #   - Enrichment API: http://localhost:8002
 #   - n8n: http://localhost:5678
+#   - Phoenix (LLM Observability): http://localhost:6006
 #   - PgAdmin: http://localhost:5050 (dev profile only)
 #   - PostgreSQL: localhost:5432
 #

@@ -14,6 +14,14 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+# Phoenix observability imports
+from openinference.instrumentation.dspy import DSPyInstrumentor
+from opentelemetry import trace as trace_api
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk import trace as trace_sdk
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.resources import Resource
+
 from . import __version__
 from .models import (
     EnrichmentRequest,
@@ -41,10 +49,59 @@ _model_name: str = ""
 _enricher: Optional[TabEnricher] = None
 
 
+def setup_phoenix_tracing():
+    """
+    Configure Phoenix/OpenTelemetry tracing for LLM observability.
+    
+    This sets up automatic instrumentation of DSPy calls to track:
+    - LLM requests and responses
+    - Token usage
+    - Latency
+    - Errors and retries
+    """
+    phoenix_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://phoenix:4317")
+    project_name = os.environ.get("PHOENIX_PROJECT_NAME", "tabbacklog")
+    
+    # Only enable if Phoenix endpoint is configured
+    if not phoenix_endpoint or phoenix_endpoint == "disabled":
+        logger.info("Phoenix tracing disabled")
+        return
+    
+    try:
+        logger.info(f"Configuring Phoenix tracing to {phoenix_endpoint}")
+        
+        # Create resource with project name
+        resource = Resource(attributes={
+            "service.name": project_name,
+            "service.version": __version__,
+        })
+        
+        # Configure tracer provider
+        tracer_provider = trace_sdk.TracerProvider(resource=resource)
+        
+        # Add OTLP exporter
+        span_exporter = OTLPSpanExporter(endpoint=phoenix_endpoint, insecure=True)
+        tracer_provider.add_span_processor(SimpleSpanProcessor(span_exporter))
+        
+        # Set as global tracer provider
+        trace_api.set_tracer_provider(tracer_provider)
+        
+        # Instrument DSPy
+        DSPyInstrumentor().instrument()
+        
+        logger.info("Phoenix tracing configured successfully")
+    except Exception as e:
+        logger.warning(f"Failed to configure Phoenix tracing: {e}")
+        logger.warning("Continuing without observability")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     global _model_name, _enricher
+
+    # Configure Phoenix tracing
+    setup_phoenix_tracing()
 
     # Configure DSPy on startup
     logger.info("Enrichment service starting...")

@@ -10,6 +10,7 @@ A Firefox tab management system that captures browser tabs into a structured dat
 - **Search**: Fuzzy search with pg_trgm and semantic search with pgvector embeddings
 - **Manage**: Web UI with filtering, bulk selection, and processing workflow
 - **Export**: Export to JSON, Markdown, or Obsidian-compatible format
+- **Observability**: LLM tracing and monitoring with Phoenix (Arize)
 
 ## Architecture
 
@@ -52,18 +53,34 @@ Firefox Bookmarks Export
 
 ### 1. Database Setup
 
+**Option A: Using Docker (Recommended)**
+
+```bash
+# Start PostgreSQL with automatic schema initialization
+docker-compose up -d postgres
+
+# Database is automatically initialized with all schema files
+# Default user (00000000-0000-0000-0000-000000000000) is created
+```
+
+**Option B: Manual Setup (Local PostgreSQL)**
+
 ```bash
 # Create database
 createdb tabbacklog
 
-# Run schema files in order
-psql tabbacklog < database/schema/01_core_tables.sql
-psql tabbacklog < database/schema/02_extensions_indexes.sql
-psql tabbacklog < database/schema/03_seed_data.sql
+# Run schema files in order (IMPORTANT: order matters!)
+psql tabbacklog < database/schema/00_auth_setup.sql
+psql tabbacklog < database/schema/01_extensions.sql
+psql tabbacklog < database/schema/02_core_tables.sql
+psql tabbacklog < database/schema/03_indexes_views.sql
+psql tabbacklog < database/schema/04_seed_data.sql
 
-# Initialize a user
+# Initialize a user (if not using default)
 psql tabbacklog -c "SELECT initialize_user_data('YOUR_USER_UUID'::uuid);"
 ```
+
+**Note:** The database requires PostgreSQL 15+ with `pgvector` extension support. For Docker, we use the `pgvector/pgvector:pg15` image.
 
 ### 2. Environment Configuration
 
@@ -115,6 +132,7 @@ docker-compose up -d
 # - n8n: http://localhost:5678
 # - Parser API: http://localhost:8001
 # - Enrichment API: http://localhost:8002
+# - Phoenix (LLM Observability): http://localhost:6006
 ```
 
 ## Project Structure
@@ -129,9 +147,11 @@ tabbacklog/
 │
 ├── database/
 │   └── schema/
-│       ├── 01_core_tables.sql      # Database schema
-│       ├── 02_extensions_indexes.sql # Extensions and indexes
-│       └── 03_seed_data.sql        # Seed data functions
+│       ├── 00_auth_setup.sql       # Auth schema (for standalone PostgreSQL)
+│       ├── 01_extensions.sql       # PostgreSQL extensions (pgvector, pg_trgm)
+│       ├── 02_core_tables.sql      # Database schema
+│       ├── 03_indexes_views.sql    # Indexes and views
+│       └── 04_seed_data.sql        # Seed data functions
 │
 ├── ingest/                     # Firefox bookmarks ingestion
 │   ├── cli.py                  # CLI entry point
@@ -337,7 +357,13 @@ LLM_API_BASE=http://localhost:1234/v1
 LLM_API_KEY=dummy_key
 LLM_MODEL_NAME=llama-3.1-8b-instruct
 LLM_TIMEOUT=60
+LLM_TEMPERATURE=0.7
 MAX_RETRIES=3
+
+# Phoenix Observability
+OTEL_EXPORTER_OTLP_ENDPOINT=http://phoenix:4317
+PHOENIX_COLLECTOR_ENDPOINT=http://localhost:6006
+PHOENIX_PROJECT_NAME=tabbacklog
 
 # Embeddings (for semantic search)
 EMBEDDING_API_BASE=http://localhost:1234/v1
@@ -454,6 +480,79 @@ uvicorn enrichment_service.main:app --port 8002
 curl http://localhost:8002/health
 ```
 
+## LLM Observability with Phoenix
+
+TabBacklog includes integrated LLM observability using [Phoenix by Arize](https://phoenix.arize.com/). Phoenix automatically traces all LLM calls, providing insights into:
+
+- **Request/Response Tracking**: See all LLM inputs and outputs
+- **Token Usage**: Monitor token consumption per request
+- **Latency Metrics**: Track response times and identify bottlenecks
+- **Error Monitoring**: Catch and debug LLM failures
+- **Cost Analysis**: Estimate API costs based on token usage
+
+### Accessing Phoenix
+
+When running with Docker Compose, Phoenix is automatically started and accessible at:
+
+```
+http://localhost:6006
+```
+
+The enrichment service automatically sends traces to Phoenix. No additional configuration needed.
+
+### Features
+
+**Trace Explorer**
+- View all LLM calls in real-time
+- Inspect prompts, completions, and metadata
+- Filter by status, latency, or token count
+
+**Analytics Dashboard**
+- Token usage over time
+- Average latency trends
+- Error rates and types
+- Request volume metrics
+
+**Prompt Engineering**
+- Compare different prompt versions
+- A/B test prompt changes
+- Track prompt performance
+
+### Configuration
+
+Phoenix is enabled by default. To disable it:
+
+```bash
+# In .env or docker-compose environment
+OTEL_EXPORTER_OTLP_ENDPOINT=disabled
+```
+
+To use a different Phoenix instance:
+
+```bash
+# Point to external Phoenix server
+OTEL_EXPORTER_OTLP_ENDPOINT=http://your-phoenix-host:4317
+PHOENIX_COLLECTOR_ENDPOINT=http://your-phoenix-host:6006
+```
+
+### Data Persistence
+
+Phoenix data is stored in a Docker volume (`tabbacklog-phoenix-data`) and persists across container restarts. To reset Phoenix data:
+
+```bash
+docker-compose down
+docker volume rm tabbacklog-phoenix-data
+docker-compose up -d
+```
+
+### Using Phoenix for Development
+
+1. **Start services**: `docker-compose up -d`
+2. **Open Phoenix**: Navigate to http://localhost:6006
+3. **Trigger enrichment**: Process some tabs through the enrichment service
+4. **View traces**: See LLM calls appear in Phoenix in real-time
+5. **Analyze**: Use Phoenix dashboards to optimize prompts and performance
+
 ## Development
 
 ### Running Tests
@@ -490,6 +589,131 @@ Set `TEST_BASE_URL` environment variable to use a different URL.
 black .
 ruff check .
 mypy .
+```
+
+## Troubleshooting
+
+### Docker Services Not Starting
+
+**Check service status:**
+```bash
+docker compose ps
+```
+
+**View logs for specific service:**
+```bash
+docker compose logs postgres
+docker compose logs enrichment
+docker compose logs web-ui
+docker compose logs phoenix
+```
+
+**Restart all services:**
+```bash
+docker compose down
+docker compose up -d
+```
+
+### Database Connection Issues
+
+**Error: "Connection refused" or "could not connect to server"**
+
+- Ensure DATABASE_URL uses Docker service name `postgres` not `localhost`
+- Correct: `postgresql://postgres:postgres@postgres:5432/tabbacklog`
+- Wrong: `postgresql://postgres:postgres@localhost:5432/tabbacklog`
+- Check postgres is healthy: `docker compose ps postgres`
+
+**Error: "database does not exist"**
+
+The database is automatically created by Docker. If using manual setup:
+```bash
+createdb tabbacklog
+```
+
+**Error: "schema 'auth' does not exist" or "type 'vector' does not exist"**
+
+Schema files must run in order. With Docker, this is automatic. For manual setup:
+```bash
+psql tabbacklog < database/schema/00_auth_setup.sql
+psql tabbacklog < database/schema/01_extensions.sql
+psql tabbacklog < database/schema/02_core_tables.sql
+psql tabbacklog < database/schema/03_indexes_views.sql
+psql tabbacklog < database/schema/04_seed_data.sql
+```
+
+### Port Conflicts
+
+**Error: "port is already allocated"**
+
+Check what's using the port:
+```bash
+# Check port 8000 (web-ui)
+sudo netstat -tulpn | grep 8000
+
+# Stop conflicting service
+docker stop <container-name>
+```
+
+Common conflicts:
+- Port 8000: Portainer, other web apps
+- Port 5432: Local PostgreSQL
+- Port 6006: Other Phoenix instances
+
+### Health Check Failures
+
+**Services showing as "unhealthy":**
+
+1. Check logs: `docker compose logs <service-name>`
+2. Verify dependencies are healthy (e.g., postgres must be healthy before web-ui)
+3. Wait for startup period (some services take 30-40 seconds)
+4. Check health endpoint manually:
+   ```bash
+   curl http://localhost:8001/health  # parser
+   curl http://localhost:8002/health  # enrichment
+   curl http://localhost:8000/health  # web-ui
+   curl http://localhost:6006/healthz # phoenix
+   ```
+
+### LLM Connection Issues
+
+**Error: "LLM connection test failed"**
+
+1. Verify LLM service is running (LM Studio, Ollama, etc.)
+2. Check LLM_API_BASE is correct in `.env`
+3. Test connection manually:
+   ```bash
+   curl http://localhost:1234/v1/models
+   ```
+4. Check enrichment service logs: `docker compose logs enrichment`
+
+### Phoenix Not Showing Traces
+
+1. Verify Phoenix is healthy: `docker compose ps phoenix`
+2. Check OTEL_EXPORTER_OTLP_ENDPOINT is not "disabled"
+3. Make a test enrichment request to generate traces
+4. Check enrichment logs for "Phoenix tracing configured successfully"
+5. Access Phoenix UI at http://localhost:6006
+
+### Resetting the Environment
+
+**Complete reset (deletes all data):**
+```bash
+docker compose down -v
+docker compose up -d
+```
+
+**Reset only database:**
+```bash
+docker compose down postgres
+docker volume rm tabbacklog-postgres-data
+docker compose up -d postgres
+```
+
+**Reset only Phoenix data:**
+```bash
+docker compose down phoenix
+docker volume rm tabbacklog-phoenix-data
+docker compose up -d phoenix
 ```
 
 ### Adding a New Parser

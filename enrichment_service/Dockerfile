@@ -18,7 +18,12 @@ ENV LLM_API_BASE=http://localhost:1234/v1
 ENV LLM_API_KEY=dummy_key
 ENV LLM_MODEL_NAME=llama-3.1-8b-instruct
 ENV LLM_TIMEOUT=60
+ENV LLM_TEMPERATURE=0.7
 ENV MAX_RETRIES=3
+
+# Phoenix observability
+ENV OTEL_EXPORTER_OTLP_ENDPOINT=http://phoenix:4317
+ENV PHOENIX_PROJECT_NAME=tabbacklog
 
 # Expose port
 EXPOSE 8002

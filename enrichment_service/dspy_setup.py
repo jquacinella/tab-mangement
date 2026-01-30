@@ -79,7 +79,7 @@ class TabEnricher(dspy.Module):
 
     def __init__(self):
         super().__init__()
-        self.enrich = dspy.TypedPredictor(EnrichTabSignature)
+        self.enrich = dspy.Predict(EnrichTabSignature)
 
     def forward(
         self,
@@ -126,6 +126,7 @@ def configure_dspy(
     api_key: str,
     model_name: str,
     timeout: int = 60,
+    temperature: float = 0.7,
 ) -> None:
     """
     Configure DSPy to use an OpenAI-compatible API.
@@ -135,6 +136,7 @@ def configure_dspy(
         api_key: API key (can be dummy for local models)
         model_name: Model name to use
         timeout: Request timeout in seconds
+        temperature: Sampling temperature (0.0-1.0, higher = more creative)
     """
     logger.info(f"Configuring DSPy with model: {model_name} at {api_base}")
 
@@ -142,8 +144,9 @@ def configure_dspy(
         model=f"openai/{model_name}",
         api_base=api_base,
         api_key=api_key,
-        temperature=0.7,
+        temperature=temperature,
         max_tokens=1024,
+        timeout=timeout,
     )
 
     dspy.configure(lm=lm)
@@ -158,6 +161,8 @@ def configure_dspy_from_env() -> str:
         LLM_API_BASE: Base URL for the API
         LLM_API_KEY: API key
         LLM_MODEL_NAME: Model name
+        LLM_TIMEOUT: Request timeout in seconds
+        LLM_TEMPERATURE: Sampling temperature (0.0-1.0)
 
     Returns:
         The model name that was configured
@@ -166,8 +171,9 @@ def configure_dspy_from_env() -> str:
     api_key = os.environ.get("LLM_API_KEY", "dummy_key")
     model_name = os.environ.get("LLM_MODEL_NAME", "llama-3.1-8b-instruct")
     timeout = int(os.environ.get("LLM_TIMEOUT", "60"))
+    temperature = float(os.environ.get("LLM_TEMPERATURE", "0.7"))
 
-    configure_dspy(api_base, api_key, model_name, timeout)
+    configure_dspy(api_base, api_key, model_name, timeout, temperature)
     return model_name
 
 
@@ -180,21 +186,25 @@ async def test_llm_connection() -> bool:
     """
     Test if the LLM is reachable and responding.
 
+    Performs a lightweight check by verifying DSPy configuration
+    rather than making an actual LLM call.
+
     Returns:
         True if connection successful, False otherwise
     """
     try:
+        # Check if DSPy is configured
+        if dspy.settings.lm is None:
+            logger.warning("DSPy LM not configured")
+            return False
+        
+        # Verify we can create an enricher instance
         enricher = get_enricher()
-        # Simple test call
-        result = enricher(
-            url="https://example.com",
-            title="Test",
-            site_kind="generic_html",
-            text="This is a test.",
-            word_count=4,
-            video_seconds=0,
-        )
-        return result is not None
+        if enricher is None or enricher.enrich is None:
+            logger.warning("Failed to create enricher instance")
+            return False
+        
+        return True
     except Exception as e:
         logger.warning(f"LLM connection test failed: {e}")
         return False

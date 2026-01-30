@@ -89,16 +89,21 @@ new → fetch_pending → parsed → llm_pending → enriched
 ### 1. Configure n8n Credentials
 
 Create a PostgreSQL credential in n8n with name `TabBacklog Postgres`:
-- Host: Your database host
-- Database: tabbacklog
-- User: Your database user
-- Password: Your database password
+- Host: `postgres` (Docker service name) or your database host
+- Database: `tabbacklog`
+- User: Your database user (default: `postgres`)
+- Password: Your database password (default: `postgres`)
+- Port: `5432`
+
+**Note:** When running in Docker, use the service name `postgres` as the host, not `localhost`.
 
 ### 2. Set Environment Variables
 
-The workflow uses these environment variables:
-- `PARSER_SERVICE_URL`: URL of the parser service (e.g., `http://parser:8001`)
-- `ENRICHMENT_SERVICE_URL`: URL of the enrichment service (e.g., `http://enrichment:8002`)
+The workflow uses these environment variables (automatically set in docker-compose.yml):
+- `PARSER_SERVICE_URL`: URL of the parser service (default: `http://parser:8001`)
+- `ENRICHMENT_SERVICE_URL`: URL of the enrichment service (default: `http://enrichment:8002`)
+
+These are configured in the `.env` file and passed to n8n via docker-compose.
 
 ### 3. Import the Workflow
 
@@ -134,15 +139,32 @@ Edit the "Split In Batches" node to change `batchSize` (default: 2)
 ### Workflow not triggering
 - Check that the workflow is activated (toggle in top right)
 - Verify n8n has correct timezone settings
+- Check n8n logs: `docker compose logs n8n`
 
 ### Database connection errors
-- Verify PostgreSQL credentials
-- Check network connectivity between n8n and database
+- Verify PostgreSQL credentials in n8n
+- Ensure host is set to `postgres` (Docker service name), not `localhost`
+- Check network connectivity: `docker exec tabbacklog-n8n ping postgres`
+- Verify postgres is healthy: `docker compose ps postgres`
 
 ### Parser/Enrichment errors
-- Check service health endpoints
-- Review service logs for detailed errors
+- Check service health endpoints:
+  ```bash
+  curl http://localhost:8001/health  # parser
+  curl http://localhost:8002/health  # enrichment
+  ```
+- Review service logs:
+  ```bash
+  docker compose logs parser
+  docker compose logs enrichment
+  ```
 - Errors are logged to `event_log` table
+- Verify services are healthy: `docker compose ps`
+
+### Service URLs not resolving
+- Ensure PARSER_SERVICE_URL and ENRICHMENT_SERVICE_URL use Docker service names
+- Correct: `http://parser:8001` and `http://enrichment:8002`
+- Wrong: `http://localhost:8001` (won't work inside Docker network)
 
 ## Monitoring
 
