@@ -348,6 +348,112 @@ PARSER_SERVICE_URL=http://localhost:8001
 ENRICHMENT_SERVICE_URL=http://localhost:8002
 ```
 
+## LLM Integration Setup
+
+TabBacklog uses an OpenAI-compatible API for two purposes:
+1. **Enrichment** - Generate summaries, classify content, assign tags (chat completions)
+2. **Embeddings** - Create vectors for semantic search (embeddings endpoint)
+
+Any provider that supports the OpenAI API format will work.
+
+### LM Studio (Local)
+
+[LM Studio](https://lmstudio.ai/) provides a local OpenAI-compatible server.
+
+1. Download and install LM Studio
+2. Download a model (e.g., `llama-3.1-8b-instruct`, `mistral-7b-instruct`)
+3. Start the local server (default port 1234)
+4. For embeddings, also load an embedding model (e.g., `nomic-embed-text-v1.5`)
+
+```bash
+# .env configuration for LM Studio
+LLM_API_BASE=http://localhost:1234/v1
+LLM_API_KEY=lm-studio
+LLM_MODEL_NAME=llama-3.1-8b-instruct
+
+EMBEDDING_API_BASE=http://localhost:1234/v1
+EMBEDDING_API_KEY=lm-studio
+EMBEDDING_MODEL_NAME=text-embedding-nomic-embed-text-v1.5
+```
+
+### Ollama (Local)
+
+[Ollama](https://ollama.ai/) is another popular local LLM runner.
+
+1. Install Ollama
+2. Pull models: `ollama pull llama3.1` and `ollama pull nomic-embed-text`
+3. Ollama runs on port 11434 by default
+
+```bash
+# .env configuration for Ollama
+LLM_API_BASE=http://localhost:11434/v1
+LLM_API_KEY=ollama
+LLM_MODEL_NAME=llama3.1
+
+EMBEDDING_API_BASE=http://localhost:11434/v1
+EMBEDDING_API_KEY=ollama
+EMBEDDING_MODEL_NAME=nomic-embed-text
+```
+
+### OpenRouter (Cloud)
+
+[OpenRouter](https://openrouter.ai/) provides access to many models via a unified API.
+
+1. Create an account at openrouter.ai
+2. Generate an API key
+3. Choose your preferred models
+
+```bash
+# .env configuration for OpenRouter
+LLM_API_BASE=https://openrouter.ai/api/v1
+LLM_API_KEY=sk-or-v1-your-api-key-here
+LLM_MODEL_NAME=anthropic/claude-3-haiku
+
+# OpenRouter supports some embedding models, or use a different provider
+EMBEDDING_API_BASE=https://openrouter.ai/api/v1
+EMBEDDING_API_KEY=sk-or-v1-your-api-key-here
+EMBEDDING_MODEL_NAME=openai/text-embedding-3-small
+```
+
+**Note:** OpenRouter charges per token. Check pricing at openrouter.ai/models.
+
+### Mixed Configuration
+
+You can use different providers for enrichment and embeddings:
+
+```bash
+# Use OpenRouter for chat (better models)
+LLM_API_BASE=https://openrouter.ai/api/v1
+LLM_API_KEY=sk-or-v1-your-key
+LLM_MODEL_NAME=anthropic/claude-3-haiku
+
+# Use local Ollama for embeddings (free, fast)
+EMBEDDING_API_BASE=http://localhost:11434/v1
+EMBEDDING_API_KEY=ollama
+EMBEDDING_MODEL_NAME=nomic-embed-text
+```
+
+### Recommended Models
+
+| Use Case | Model | Notes |
+|----------|-------|-------|
+| Enrichment (local) | `llama-3.1-8b-instruct` | Good balance of speed and quality |
+| Enrichment (cloud) | `anthropic/claude-3-haiku` | Fast, affordable, high quality |
+| Embeddings (local) | `nomic-embed-text-v1.5` | Open source, good quality |
+| Embeddings (cloud) | `text-embedding-3-small` | OpenAI's efficient embedding model |
+
+### Testing the Connection
+
+After configuration, test that the LLM is reachable:
+
+```bash
+# Start the enrichment service
+uvicorn enrichment_service.main:app --port 8002
+
+# Check health (includes LLM status)
+curl http://localhost:8002/health
+```
+
 ## Development
 
 ### Running Tests
